@@ -1,0 +1,30 @@
+# Copie vendue de egui_software_backend 0.0.3 (MIT OR Apache-2.0, © DGriffin91),
+# portée d'egui 0.34 vers egui 0.37 pour fx. Voir VENDOR.md.
+[package]
+name = "egui_software_backend"
+description = "A CPU software render backend for egui (vendored, ported to egui 0.37)."
+version = "0.0.3"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+egui = { version = "0.37", default-features = false }
+strength_reduce = "0.2.4"
+# egui 0.37 ne réexporte plus ahash.
+ahash = { version = "0.8", default-features = false, features = ["std"] }
+constify = "0.0.1"
+rayon = { version = "1.11.0", optional = true }
+log = { version = "0.4", optional = true }
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
+egui-winit = { version = "0.37", default-features = false, optional = true }
+bytemuck = { version = "1.25", optional = true }
+
+[features]
+default = ["std", "winit"]
+std = []
+log = ["dep:log"]
+rayon = ["dep:rayon"]
+raster_stats = ["std"]
+winit = ["dep:winit", "softbuffer", "egui-winit", "bytemuck"]

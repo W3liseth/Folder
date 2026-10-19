@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <!-- Variante 16 px calée sur la grille : tuile sombre, bord bleu/rouge/vert, feuilles
+       (vert, rouge, jaune) et façade bleue avec reflet clair. -->
+  <rect x="1" y="1" width="14" height="14" rx="3" fill="#1C2230" shape-rendering="geometricPrecision"/>
+  <rect x="1.5" y="1.5" width="13" height="13" rx="2.7" fill="none" stroke="#3A63E0" stroke-width="1" shape-rendering="geometricPrecision"/>
+  <rect x="3" y="4" width="1" height="8" fill="#2FCB72"/>
+  <rect x="4" y="3" width="3" height="1" fill="#E8311E"/>
+  <rect x="4" y="4" width="8" height="8" fill="#F04A1F"/>
+  <rect x="11" y="4" width="1" height="1" fill="#FF8C1A"/>
+  <rect x="5" y="5" width="7" height="7" fill="#FFC72A"/>
+  <rect x="6" y="7" width="7" height="6" fill="#1E78EC"/>
+  <rect x="6" y="7" width="7" height="1" fill="#8EE3FF"/>
+  <rect x="11" y="10" width="2" height="3" fill="#5B5AF0"/>
+</svg>

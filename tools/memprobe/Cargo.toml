@@ -1,0 +1,15 @@
+[package]
+name = "memprobe"
+description = "Lance fx, mesure mémoire privée, threads et temps de démarrage face aux budgets."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-win.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

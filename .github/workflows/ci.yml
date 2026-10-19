@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Remplace .cargo/config.toml : on y reporte le runtime C statique.
+  RUSTFLAGS: -D warnings -C target-feature=+crt-static
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (backend wgpu)
+        run: cargo clippy -p folder --features wgpu -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Build release
+        run: cargo build --release --workspace
+
+      - name: Benchmarks (compilation seulement)
+        run: cargo bench --workspace --no-run
+
+      - name: renderbench (compilation avec rayon)
+        run: cargo build --release -p renderbench --features rayon
+
+      # memprobe n'est pas exécuté ici : les runners n'ont pas de GPU représentatif et la
+      # mémoire mesurée dépend du pilote. À lancer localement (cf. CLAUDE.md).

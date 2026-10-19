@@ -1,0 +1,5 @@
+# Runtime C lié statiquement : folder.exe ne dépend pas de VCRUNTIME140.dll (absent d'un
+# Windows neuf), l'installeur n'a donc aucun redistribuable à embarquer. Coût : ~150 Ko.
+# Attention : la variable RUSTFLAGS, si elle est définie, remplace ce réglage (cf. CI).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

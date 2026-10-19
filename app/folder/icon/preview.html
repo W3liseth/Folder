@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Icône folder</title>
+<style>
+  body { margin: 0; padding: 24px; font: 13px "Segoe UI", sans-serif; color: #ddd; }
+  .row { display: flex; gap: 28px; align-items: end; padding: 20px; border-radius: 10px; margin-bottom: 16px; }
+  .dark { background: #202020; } .light { background: #f3f3f3; color: #222; }
+  figure { margin: 0; text-align: center; } canvas { display: block; margin: 0 auto 6px; image-rendering: pixelated; }
+</style>
+<div class="row dark" id="dark"></div>
+<div class="row light" id="light"></div>
+<script>
+// Rendu de folder.svg (sans ombre de 20 à 40 px) et folder-small.svg (16 px) à chaque taille de l'.ico ;
+// window.pngs reçoit les PNG en base64 pour l'assemblage.
+const SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256];
+async function load(url) {
+  const img = new Image(); img.src = url; await img.decode(); return img;
+}
+window.pngs = {};
+window.ready = (async () => {
+  const big = await load("folder.svg"), small = await load("folder-small.svg");
+  // Tailles intermédiaires : même dessin sans ombre portée (halo flou une fois réduit).
+  const text = (await (await fetch("folder.svg")).text()).replaceAll(' filter="url(#shadow)"', "");
+  const mid = await load(URL.createObjectURL(new Blob([text], { type: "image/svg+xml" })));
+  for (const s of SIZES) {
+    const c = document.createElement("canvas"); c.width = c.height = s;
+    const g = c.getContext("2d"); g.imageSmoothingQuality = "high";
+    g.drawImage(s <= 16 ? small : s <= 40 ? mid : big, 0, 0, s, s);
+    window.pngs[s] = c.toDataURL("image/png").split(",")[1];
+    for (const id of ["dark", "light"]) {
+      const f = document.createElement("figure");
+      const v = document.createElement("canvas"); v.width = v.height = s;
+      v.getContext("2d").drawImage(c, 0, 0);
+      const z = Math.max(1, Math.floor(64 / s)); v.style.width = v.style.height = (s * z) + "px";
+      f.append(v, s + " px"); document.getElementById(id).append(f);
+    }
+  }
+  return true;
+})();
+</script>

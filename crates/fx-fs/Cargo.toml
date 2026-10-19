@@ -1,0 +1,18 @@
+[package]
+name = "fx-fs"
+description = "Accès au système de fichiers : énumération en flux (phase 0), puis surveillance et opérations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-core.workspace = true
+fx-win.workspace = true
+crossbeam-channel.workspace = true
+tracing.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

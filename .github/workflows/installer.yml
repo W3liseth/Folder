@@ -1,0 +1,60 @@
+name: Installeur
+
+# Construit l'installeur Windows (Inno Setup) : à la demande (onglet Actions) ou à chaque tag
+# de version `v*`, auquel cas il est joint à une release GitHub.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Pas de RUSTFLAGS ici : il remplacerait .cargo/config.toml (runtime C statique).
+      - name: Compilation (release)
+        run: cargo build --release -p folder
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($meta.packages | Where-Object name -eq 'folder').version
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME.TrimStart('v')
+            if ($tag -ne $version) { throw "Tag $env:GITHUB_REF_NAME ≠ version $version de Cargo.toml" }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Installeur
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" installer\folder.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: folder-setup-${{ steps.version.outputs.version }}-x64
+          path: target/installer/*.exe
+          if-no-files-found: error
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/installer/*.exe
+          generate_release_notes: true

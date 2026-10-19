@@ -1,0 +1,575 @@
+//! Page Paramètres (dans sa propre fenêtre, cf. `settings_window`) : général, apparence,
+//! dossiers, étiquettes, raccourcis, à propos. Chaque modification est envoyée à la fenêtre
+//! principale, qui l'applique et l'enregistre aussitôt.
+
+use eframe::egui::{
+    self, Align, Align2, Color32, Frame, Id, Layout, RichText, ScrollArea, Sense, Ui, pos2, vec2,
+};
+use fx_app::Msg;
+use fx_commands::{CommandId, Group};
+use fx_store::{Layout as View, Settings, Tag, ThemeChoice};
+
+use super::Fx;
+use crate::theme::{glyph, icon_font, semibold};
+use crate::widgets;
+
+const SECTIONS: [(&str, &str); 6] = [
+    (glyph::SETTINGS, "Général"),
+    (glyph::PALETTE, "Apparence"),
+    (glyph::FOLDER, "Dossiers"),
+    (glyph::TAG, "Étiquettes"),
+    (glyph::KEYBOARD, "Raccourcis"),
+    (glyph::INFO, "À propos"),
+];
+
+/// Page Paramètres dans la fenêtre courante (fenêtre Paramètres à part entière) :
+/// navigation à gauche, section choisie à droite.
+pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
+    let pal = f.pal;
+    egui::Panel::left("settings-nav")
+        .exact_size(230.0)
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(
+            Frame::new()
+                .fill(pal.base)
+                .inner_margin(egui::Margin::symmetric(12, 16)),
+        )
+        .show(ui, |ui| {
+            ui.label(RichText::new("Paramètres").font(semibold(22.0)));
+            ui.add_space(16.0);
+            for (i, (g, label)) in SECTIONS.iter().enumerate() {
+                let (rect, r) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+                let active = f.vs.settings_section == i;
+                let t = ui
+                    .ctx()
+                    .animate_bool_with_time(r.id.with("a"), active, 0.15);
+                if t > 0.0 {
+                    ui.painter()
+                        .rect_filled(rect, 6.0, pal.hover.gamma_multiply(1.6 * t));
+                    ui.painter().rect_filled(
+                        egui::Rect::from_center_size(
+                            pos2(rect.left() + 2.0, rect.center().y),
+                            vec2(3.0, 16.0 * t),
+                        ),
+                        1.5,
+                        pal.accent,
+                    );
+                } else {
+                    widgets::hover_fill(ui, &r, rect, &pal, 6.0);
+                }
+                ui.painter().text(
+                    pos2(rect.left() + 22.0, rect.center().y),
+                    Align2::CENTER_CENTER,
+                    *g,
+                    icon_font(15.0),
+                    if active { pal.accent } else { pal.text2 },
+                );
+                ui.painter().text(
+                    pos2(rect.left() + 44.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    *label,
+                    egui::FontId::proportional(14.0),
+                    pal.text,
+                );
+                if r.clicked() {
+                    f.vs.settings_section = i;
+                }
+            }
+        });
+    egui::CentralPanel::default()
+        .frame(
+            Frame::new()
+                .fill(pal.layer)
+                .inner_margin(egui::Margin::symmetric(28, 20)),
+        )
+        .show(ui, |ui| {
+            ui.label(RichText::new(SECTIONS[f.vs.settings_section].1).font(semibold(26.0)));
+            ui.add_space(14.0);
+            ScrollArea::vertical()
+                .id_salt("settings-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width().min(760.0));
+                    let mut s = f.state.settings.clone();
+                    let before = s.clone();
+                    match f.vs.settings_section {
+                        0 => general(ui, f, &mut s),
+                        1 => appearance(ui, f, &mut s),
+                        2 => folders(ui, f, &mut s),
+                        3 => tags(ui, f, &mut s),
+                        4 => shortcuts(ui, f, &mut s),
+                        _ => about(ui, f),
+                    }
+                    if s != before {
+                        f.send(Msg::UpdateSettings(Box::new(s)));
+                    }
+                });
+        });
+}
+
+/// Ligne de réglage façon Windows 11 : titre, description, contrôle à droite.
+fn setting(ui: &mut Ui, f: &Fx<'_>, title: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
+    let pal = f.pal;
+    Frame::new()
+        .fill(pal.layer)
+        .stroke(egui::Stroke::new(1.0, pal.stroke))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(title);
+                    if !desc.is_empty() {
+                        ui.label(RichText::new(desc).size(12.0).color(pal.text2));
+                    }
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), control);
+            });
+        });
+    ui.add_space(4.0);
+}
+
+fn toggle(ui: &mut Ui, on: &mut bool) {
+    let (rect, r) = ui.allocate_exact_size(vec2(40.0, 20.0), Sense::click());
+    if r.clicked() {
+        *on = !*on;
+    }
+    let t = ui.ctx().animate_bool_with_time(r.id, *on, 0.12);
+    let v = ui.visuals();
+    let accent = v.hyperlink_color;
+    let bg = if *on { accent } else { Color32::TRANSPARENT };
+    ui.painter()
+        .rect_filled(rect, 10.0, bg.gamma_multiply(t.max(0.0)));
+    ui.painter().rect_stroke(
+        rect,
+        10.0,
+        egui::Stroke::new(
+            1.0,
+            if *on {
+                accent
+            } else {
+                v.widgets.noninteractive.fg_stroke.color
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, t);
+    let knob = if *on {
+        Color32::WHITE
+    } else {
+        v.widgets.noninteractive.fg_stroke.color
+    };
+    ui.painter().circle_filled(
+        pos2(x, rect.center().y),
+        if r.hovered() { 6.0 } else { 5.0 },
+        knob,
+    );
+}
+
+fn general(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    setting(
+        ui,
+        f,
+        "Restaurer les onglets au démarrage",
+        "Rouvre les onglets de la dernière session.",
+        |ui| toggle(ui, &mut s.restore_session),
+    );
+    setting(
+        ui,
+        f,
+        "Confirmer les suppressions",
+        "Demande confirmation avant d'envoyer à la corbeille.",
+        |ui| toggle(ui, &mut s.confirm_delete),
+    );
+    setting(
+        ui,
+        f,
+        "Ouvrir d'un simple clic",
+        "Ouvre fichiers et dossiers d'un clic, comme un lien.",
+        |ui| toggle(ui, &mut s.single_click),
+    );
+    let pal = f.pal;
+    setting(
+        ui,
+        f,
+        "Vitesse de défilement",
+        "Lignes parcourues par cran de molette (3 par défaut, comme Windows).",
+        |ui| {
+            widgets::slider(ui, &pal, &mut s.scroll_lines, 1.0..=10.0, 1.0, " lignes");
+        },
+    );
+}
+
+fn appearance(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    setting(
+        ui,
+        f,
+        "Thème",
+        "Clair, sombre ou selon le réglage de Windows.",
+        |ui| {
+            egui::ComboBox::from_id_salt("theme")
+                .selected_text(match s.theme {
+                    ThemeChoice::System => "Système",
+                    ThemeChoice::Light => "Clair",
+                    ThemeChoice::Dark => "Sombre",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.theme, ThemeChoice::System, "Système");
+                    ui.selectable_value(&mut s.theme, ThemeChoice::Light, "Clair");
+                    ui.selectable_value(&mut s.theme, ThemeChoice::Dark, "Sombre");
+                });
+        },
+    );
+    accent_setting(ui, f, s);
+    setting(ui, f, "Barre latérale", "", |ui| {
+        toggle(ui, &mut s.show_sidebar)
+    });
+    setting(
+        ui,
+        f,
+        "Épaisseur des jauges des lecteurs",
+        "Espace utilisé, sous chaque lecteur de la barre latérale.",
+        |ui| {
+            widgets::slider(ui, &pal, &mut s.drive_bar, 2.0..=10.0, 1.0, " px");
+        },
+    );
+    setting(ui, f, "Volet d'aperçu", "", |ui| {
+        toggle(ui, &mut s.show_preview)
+    });
+}
+
+/// Couleur d'accentuation : celle de Windows, une couleur proposée ou une couleur libre.
+fn accent_setting(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    Frame::new()
+        .fill(pal.layer)
+        .stroke(egui::Stroke::new(1.0, pal.stroke))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Couleur d'accentuation");
+                    ui.label(
+                        RichText::new("Boutons, sélection, indicateurs.")
+                            .size(12.0)
+                            .color(pal.text2),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let mut system = s.accent.is_none();
+                    if ui.checkbox(&mut system, "Couleur de Windows").changed() {
+                        s.accent = if system {
+                            None
+                        } else {
+                            let c = f.vs.system_accent;
+                            Some([c.r(), c.g(), c.b()])
+                        };
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for c in crate::theme::ACCENTS {
+                    let (rect, r) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+                    let color = egui::Color32::from_rgb(c[0], c[1], c[2]);
+                    ui.painter().rect_filled(rect.shrink(3.0), 6.0, color);
+                    if s.accent == Some(c) {
+                        ui.painter().rect_stroke(
+                            rect,
+                            8.0,
+                            egui::Stroke::new(2.0, pal.text),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if r.hovered() {
+                        ui.painter().rect_stroke(
+                            rect,
+                            8.0,
+                            egui::Stroke::new(1.0, pal.text2),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if r.clicked() {
+                        s.accent = Some(c);
+                    }
+                }
+            });
+            // Couleur libre : sélecteur complet (teinte, saturation et luminosité, valeurs
+            // RVB / TSV / hexadécimale).
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Couleur personnalisée")
+                    .size(12.0)
+                    .color(pal.text2),
+            );
+            ui.add_space(4.0);
+            // Couleur réglée telle quelle : `pal.accent` est éclaircie en thème sombre, le
+            // sélecteur perdrait sa position à chaque image.
+            let raw = crate::theme::accent_of(s, f.vs.system_accent);
+            if let Some(c) = widgets::color_picker(ui, &pal, raw) {
+                s.accent = Some([c.r(), c.g(), c.b()]);
+            }
+        });
+    ui.add_space(4.0);
+}
+
+fn folders(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    setting(ui, f, "Afficher les éléments masqués", "", |ui| {
+        toggle(ui, &mut s.show_hidden)
+    });
+    setting(ui, f, "Afficher les extensions de fichiers", "", |ui| {
+        toggle(ui, &mut s.show_extensions)
+    });
+    setting(
+        ui,
+        f,
+        "Dossiers en premier",
+        "Les dossiers précèdent les fichiers, quel que soit le tri.",
+        |ui| toggle(ui, &mut s.folders_first),
+    );
+    setting(
+        ui,
+        f,
+        "Miniatures",
+        "Affiche l'aperçu des images et vidéos en grandes icônes.",
+        |ui| toggle(ui, &mut s.show_thumbnails),
+    );
+    setting(
+        ui,
+        f,
+        "Disposition par défaut",
+        "Pour les dossiers sans préférence mémorisée.",
+        |ui| {
+            egui::ComboBox::from_id_salt("layout")
+                .selected_text(s.default_layout.label())
+                .show_ui(ui, |ui| {
+                    for l in [View::Details, View::List, View::Grid, View::Columns] {
+                        ui.selectable_value(&mut s.default_layout, l, l.label());
+                    }
+                });
+        },
+    );
+    setting(ui, f, "Taille des grandes icônes", "", |ui| {
+        let mut size = f32::from(s.grid_size);
+        if widgets::slider(ui, &pal, &mut size, 48.0..=256.0, 8.0, " px").changed() {
+            s.grid_size = size as u16;
+        }
+    });
+}
+
+fn tags(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    setting(
+        ui,
+        f,
+        "Activer les étiquettes",
+        "Section de la barre latérale et de l'accueil, menu contextuel, pastilles après les noms.",
+        |ui| toggle(ui, &mut s.show_tags),
+    );
+    if !s.show_tags {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new("Les étiquettes s'appliquent depuis le menu contextuel des fichiers.")
+            .color(pal.text2),
+    );
+    ui.add_space(8.0);
+    // Une carte par étiquette, sur deux lignes : nom (et suppression), puis couleurs. Les
+    // couleurs passent à la ligne si la fenêtre est étroite : rien ne se chevauche.
+    for t in f.state.tags.list.clone() {
+        Frame::new()
+            .fill(pal.layer)
+            .stroke(egui::Stroke::new(1.0, pal.stroke))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let (slot, _) = ui.allocate_exact_size(vec2(24.0, 28.0), Sense::hover());
+                    widgets::tag_icon(ui, slot.center(), 17.0, t.color);
+                    let id = Id::unique(("tagname", t.id));
+                    let mut name = ui
+                        .data(|d| d.get_temp::<String>(id))
+                        .unwrap_or_else(|| t.name.clone());
+                    let width = (ui.available_width() - 190.0).clamp(120.0, 320.0);
+                    let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(width));
+                    if r.changed() {
+                        ui.data_mut(|d| d.insert_temp(id, name.clone()));
+                    }
+                    if r.lost_focus() && !name.trim().is_empty() && name != t.name {
+                        f.send(Msg::SaveTag(Tag {
+                            name: name.trim().to_owned(),
+                            ..t.clone()
+                        }));
+                        ui.data_mut(|d| d.remove::<String>(id));
+                    }
+                    let n = f.state.tags.count(t.id);
+                    ui.label(
+                        RichText::new(format!("{n} élément{}", if n > 1 { "s" } else { "" }))
+                            .size(12.5)
+                            .color(pal.text3),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if widgets::icon_button(
+                            ui,
+                            &pal,
+                            glyph::DELETE,
+                            "Supprimer l'étiquette",
+                            true,
+                            vec2(30.0, 28.0),
+                        )
+                        .clicked()
+                        {
+                            f.send(Msg::DeleteTag(t.id));
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    ui.add_space(30.0);
+                    for c in widgets::TAG_COLORS {
+                        let (rect, r) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                        let fill = egui::Color32::from_rgb(c[0], c[1], c[2]);
+                        ui.painter().circle_filled(rect.center(), 8.0, fill);
+                        if c == t.color {
+                            ui.painter().circle_stroke(
+                                rect.center(),
+                                10.5,
+                                egui::Stroke::new(2.0, pal.text),
+                            );
+                        } else if r.hovered() {
+                            ui.painter().circle_stroke(
+                                rect.center(),
+                                10.5,
+                                egui::Stroke::new(1.0, pal.text2),
+                            );
+                        }
+                        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            f.send(Msg::SaveTag(Tag {
+                                color: c,
+                                ..t.clone()
+                            }));
+                        }
+                    }
+                    ui.add_space(4.0);
+                    let mut color = t.color;
+                    if ui
+                        .color_edit_button_srgb(&mut color)
+                        .on_hover_text("Autre couleur…")
+                        .changed()
+                    {
+                        f.send(Msg::SaveTag(Tag { color, ..t.clone() }));
+                    }
+                });
+            });
+        ui.add_space(6.0);
+    }
+    ui.add_space(6.0);
+    if ui.button(format!("{}  Nouvelle étiquette", '+')).clicked() {
+        let n = f.state.tags.list.len();
+        f.send(Msg::SaveTag(Tag {
+            id: 0,
+            name: format!("Étiquette {}", n + 1),
+            color: widgets::TAG_COLORS[n % widgets::TAG_COLORS.len()],
+        }));
+    }
+}
+
+fn shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    // Capture de la prochaine combinaison pour la commande en cours d'édition.
+    if let Some(cmd) = f.vs.capture_hotkey {
+        let pressed = crate::keys::pressed(ui.ctx());
+        if let Some(hk) = pressed
+            .into_iter()
+            .find(|h| h.key != fx_commands::Key::Escape || h.ctrl || h.alt || h.shift)
+        {
+            s.keybindings.insert(cmd, vec![hk]);
+            f.vs.capture_hotkey = None;
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            f.vs.capture_hotkey = None;
+        }
+    }
+    ui.label(
+        RichText::new(
+            "Cliquez sur un raccourci pour le modifier, puis appuyez sur la nouvelle combinaison.",
+        )
+        .color(pal.text2),
+    );
+    ui.add_space(8.0);
+    let mut group = None;
+    for &id in CommandId::ALL {
+        if group != Some(id.group()) {
+            group = Some(id.group());
+            widgets::section(ui, &pal, group_label(id.group()));
+        }
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(id.glyph())
+                    .font(icon_font(13.0))
+                    .color(pal.text2),
+            );
+            ui.label(id.label());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let custom = s.keybindings.contains_key(&id);
+                if custom
+                    && ui
+                        .small_button("Rétablir")
+                        .on_hover_text("Raccourci par défaut")
+                        .clicked()
+                {
+                    s.keybindings.remove(&id);
+                }
+                let capturing = f.vs.capture_hotkey == Some(id);
+                let text = if capturing {
+                    "Appuyez sur une touche…".to_owned()
+                } else {
+                    let keys = s
+                        .keybindings
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_else(|| id.default_hotkeys());
+                    if keys.is_empty() {
+                        "—".to_owned()
+                    } else {
+                        keys.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("   ")
+                    }
+                };
+                let b = egui::Button::new(RichText::new(text).monospace().size(12.0))
+                    .min_size(vec2(160.0, 26.0));
+                if ui.add(b).clicked() {
+                    f.vs.capture_hotkey = Some(id);
+                }
+            });
+        });
+    }
+}
+
+fn group_label(g: Group) -> &'static str {
+    g.label()
+}
+
+fn about(ui: &mut Ui, f: &mut Fx<'_>) {
+    let pal = f.pal;
+    ui.label(RichText::new(format!("folder {}", env!("CARGO_PKG_VERSION"))).font(semibold(16.0)));
+    ui.label(RichText::new("Gestionnaire de fichiers natif pour Windows, écrit en Rust : rendu CPU, aucune WebView, aucun moteur JavaScript.").color(pal.text2));
+    ui.add_space(10.0);
+    ui.label(
+        RichText::new("Mémoire, threads et caches de la fenêtre principale : diagnostics (F12).")
+            .color(pal.text2),
+    );
+    ui.add_space(10.0);
+    ui.label(RichText::new("Interface inspirée de Files (Files Community) et de l'Explorateur de Windows 11. Rasterisation CPU dérivée de egui_software_backend (MIT/Apache-2.0).").size(12.0).color(pal.text3));
+}

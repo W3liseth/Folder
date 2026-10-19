@@ -1,0 +1,17 @@
+[package]
+name = "fx-shell"
+description = "Services shell : chargeur d'icônes et de miniatures sur un thread STA, clés de cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-core.workspace = true
+fx-win.workspace = true
+crossbeam-channel.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

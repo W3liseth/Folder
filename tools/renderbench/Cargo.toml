@@ -1,0 +1,23 @@
+[package]
+name = "renderbench"
+description = "Rendu hors écran de la vraie vue fx (100k entrées) : coût egui, tessellation et rasterisation CPU par résolution."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-ui.workspace = true
+fx-app.workspace = true
+fx-store.workspace = true
+fx-fs.workspace = true
+fx-win.workspace = true
+egui_software_backend = { workspace = true, default-features = false, features = ["std"] }
+anyhow.workspace = true
+
+[features]
+rayon = ["egui_software_backend/rayon"]
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "folder"
+description = "Gestionnaire de fichiers natif, rapide et sobre."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-ui.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+embed-resource.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+wgpu = ["fx-ui/wgpu"]

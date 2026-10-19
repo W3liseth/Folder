@@ -1,0 +1,120 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/fx-core",
+    "crates/fx-win",
+    "crates/fx-fs",
+    "crates/fx-commands",
+    "crates/fx-store",
+    "crates/fx-shell",
+    "crates/fx-preview",
+    "crates/fx-app",
+    "crates/fx-ui",
+    "app/folder",
+    "tools/gen-tree",
+    "tools/memprobe",
+    "tools/renderbench",
+]
+# Code tiers vendu : compilé comme dépendance, hors lints et fmt du workspace.
+exclude = ["vendor/egui_software_backend"]
+default-members = ["app/folder"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+fx-core = { path = "crates/fx-core" }
+fx-win = { path = "crates/fx-win" }
+fx-fs = { path = "crates/fx-fs" }
+fx-app = { path = "crates/fx-app" }
+fx-ui = { path = "crates/fx-ui" }
+fx-commands = { path = "crates/fx-commands" }
+fx-store = { path = "crates/fx-store" }
+fx-shell = { path = "crates/fx-shell" }
+fx-preview = { path = "crates/fx-preview" }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = { version = "1.1.8", default-features = false, features = ["std", "parse", "serde", "display"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
+# Deflate en Rust pur (zlib-rs) : pas de DLL, pas de compilation C.
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+egui_software_backend = { path = "vendor/egui_software_backend", default-features = false, features = ["std"] }
+
+crossbeam-channel = "0.5.17"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter", "std"] }
+# glow (OpenGL) plutôt que wgpu : empreinte mémoire nettement plus faible (cf. ARCHITECTURE.md §3.1).
+# Pas de default_fonts : on charge les polices système Segoe.
+# `clipboard` et `links` activent aussi egui-winit pour le moteur CPU (unification des features).
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "links", "glow"] }
+embed-resource = "3.0.12"
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+# Requis par la macro `#[implement]` (interfaces COM implémentées en Rust).
+windows-core = "0.62.2"
+
+[workspace.dependencies.windows]
+version = "0.62.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_System_Variant",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+debug = false
+panic = "unwind"
+
+[profile.release-dbg]
+inherits = "release"
+debug = true
+strip = false
+
+# Les outils et benchs n'ont pas besoin de LTO : compilation plus rapide.
+[profile.bench]
+lto = "thin"

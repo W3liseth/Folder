@@ -1,0 +1,30 @@
+[package]
+name = "fx-ui"
+description = "Rendu egui : lit l'état, émet des messages, aucune logique métier ni I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fx-core.workspace = true
+fx-fs.workspace = true
+fx-app.workspace = true
+fx-win.workspace = true
+fx-commands.workspace = true
+fx-store.workspace = true
+fx-shell.workspace = true
+fx-preview.workspace = true
+eframe.workspace = true
+egui_software_backend = { workspace = true, features = ["winit"] }
+crossbeam-channel.workspace = true
+tracing.workspace = true
+# Backend wgpu optionnel, limité à DirectX 12 (comparaison mémoire avec glow).
+wgpu = { version = "30", default-features = false, features = ["dx12", "wgsl", "std", "parking_lot"], optional = true }
+
+[features]
+wgpu = ["eframe/wgpu_no_default_features", "dep:wgpu"]
+
+[lints]
+workspace = true
