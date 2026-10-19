@@ -1,21 +1,62 @@
 name: Installeur
 
-# Construit l'installeur Windows (Inno Setup) : à la demande (onglet Actions) ou à chaque tag
-# de version `v*`, auquel cas il est joint à une release GitHub.
+# Une release par version : la version est celle de `[workspace.package]` dans Cargo.toml.
+# À chaque push sur main qui modifie Cargo.toml, et à la demande (onglet Actions) : si la
+# release `v<version>` n'existe pas encore, l'installeur est construit puis joint à une
+# nouvelle release (tag créé sur le commit). Si elle existe déjà, un push ne fait rien et un
+# lancement à la demande construit seulement l'installeur (artefact du run).
 on:
-  workflow_dispatch:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["Cargo.toml"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# Deux runs simultanés pourraient tous deux juger la release absente.
+concurrency:
+  group: installer
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version et release existante
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version invalide dans Cargo.toml : '$version'"
+            exit 1
+          fi
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            release=false
+            echo "::notice::La release v$version existe déjà : pas de nouvelle release."
+          else
+            release=true
+            echo "::notice::Nouvelle release v$version."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
   installer:
+    needs: version
+    if: needs.version.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -25,36 +66,30 @@ jobs:
       - name: Compilation (release)
         run: cargo build --release -p folder
 
-      - name: Version
-        id: version
-        shell: pwsh
-        run: |
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = ($meta.packages | Where-Object name -eq 'folder').version
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $tag = $env:GITHUB_REF_NAME.TrimStart('v')
-            if ($tag -ne $version) { throw "Tag $env:GITHUB_REF_NAME ≠ version $version de Cargo.toml" }
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Inno Setup
         run: choco install innosetup --no-progress -y
 
       - name: Installeur
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" installer\folder.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" installer\folder.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: folder-setup-${{ steps.version.outputs.version }}-x64
+          name: folder-setup-${{ env.VERSION }}-x64
           path: target/installer/*.exe
           if-no-files-found: error
 
       - name: Release
-        if: github.ref_type == 'tag'
+        if: needs.version.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: target/installer/*.exe
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: folder ${{ env.VERSION }}
+          # Version avec suffixe (0.2.0-beta.1) : publiée comme préversion.
+          prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
+          files: target/installer/folder-setup-${{ env.VERSION }}-x64.exe
+          fail_on_unmatched_files: true

@@ -856,8 +856,11 @@ télémétrie distante.
   utilisateurs » en option), menu Démarrer, raccourci Bureau facultatif, fermeture de folder
   avant mise à jour, réglages conservés à la désinstallation. Runtime C lié statiquement
   (`.cargo/config.toml`, `+crt-static`) : aucun redistribuable Visual C++ à installer.
-  Construit par `.github/workflows/installer.yml` (à la demande ou sur tag `v*`, joint à la
-  release). Pas encore de signature de code : SmartScreen avertit au premier lancement.
+  Construit par `.github/workflows/installer.yml` : la version de `[workspace.package]`
+  (Cargo.toml) fait foi ; un push sur `main` qui la change (ou un lancement à la demande)
+  crée la release `v<version>` avec l'installeur si elle n'existe pas encore (préversion si
+  la version a un suffixe). Pas encore de signature de code : SmartScreen avertit au premier
+  lancement.
 
 - **Commandes** (§7.6) : `fx-commands` ne contient que les métadonnées (macro `commands!`
   dans `lib.rs` : identifiant, catégorie, libellé, glyphe, raccourcis) ; l'exécution vit

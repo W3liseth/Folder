@@ -84,7 +84,8 @@ Rendu partiel comparé image par image au rendu complet (défilement, survol, me
 cargo run --release -p renderbench -- --tree bench-data/100k --verify
 ```
 
-Installeur Windows (Inno Setup 6 requis ; en CI : `.github/workflows/installer.yml`) :
+Installeur Windows (Inno Setup 6 requis). En CI, `.github/workflows/installer.yml` publie
+la release `v<version>` dès que la version de `[workspace.package]` (Cargo.toml) change sur `main` :
 
 ```bash
 iscc /DAppVersion=0.1.0 installer/folder.iss
