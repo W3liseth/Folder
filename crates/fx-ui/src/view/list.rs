@@ -527,9 +527,8 @@ pub(crate) fn background(ui: &Ui, f: &mut Fx<'_>, pane: PaneId, bg: &Response) {
             });
         }
     }
-    if bg.contains_pointer() && ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
-        ui.ctx()
-            .data_mut(|d| d.remove::<std::path::PathBuf>(Id::unique("fx-drop-target")));
+    if let Some(fx_app::Location::Dir(dir)) = f.state.find_pane(pane).map(fx_app::Pane::location) {
+        super::dnd::pane_zone(f, bg.rect, dir);
     }
     bg.context_menu(|ui| menus::background_menu(ui, f));
 }

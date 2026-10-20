@@ -297,6 +297,97 @@ fn tabs_open_close_and_reopen() {
 }
 
 #[test]
+fn detached_tab_moves_to_a_new_window() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    // Seul onglet : il reste (la fenêtre serait vide).
+    assert!(
+        update(
+            &mut s,
+            Msg::DetachTab {
+                index: 0,
+                rect: None
+            }
+        )
+        .is_empty()
+    );
+    assert_eq!(s.tabs.len(), 1);
+
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    let rect = Some([10, 20, 1210, 800]);
+    let fx = update(&mut s, Msg::DetachTab { index: 0, rect });
+    assert_eq!((s.tabs.len(), s.active_tab), (1, 0));
+    assert_eq!(s.pane().location(), &Location::Home);
+    assert!(fx.iter().any(|e| matches!(e,
+        Effect::NewWindow { start: Some(p), rect: r } if p == &PathBuf::from(r"C:\a") && *r == rect)));
+    // Rien à rouvrir : l'onglet n'a pas été fermé, il a changé de fenêtre.
+    assert!(s.closed_tabs.is_empty());
+    // Nouvelle fenêtre depuis l'accueil : l'accueil, pas la session restaurée.
+    let fx = update(&mut s, Msg::Command(CommandId::NewWindow));
+    assert!(fx.iter().any(|e| matches!(e,
+        Effect::NewWindow { start: Some(p), rect: None } if Location::from_path(p.clone()) == Location::Home)));
+}
+
+#[test]
+fn tab_moves_between_windows() {
+    // Fenêtre source : l'onglet part, sans être proposé à la réouverture.
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    update(&mut s, Msg::RemoveTab(0));
+    assert_eq!((s.tabs.len(), s.active_tab), (1, 0));
+    assert_eq!(s.pane().location(), &Location::Home);
+    assert!(s.closed_tabs.is_empty());
+    // Le dernier onglet reste (la fenêtre se ferme d'elle-même).
+    update(&mut s, Msg::RemoveTab(0));
+    assert_eq!(s.tabs.len(), 1);
+
+    // Fenêtre cible : nouvel onglet inséré, activé, chargé, avec son historique.
+    let mut t = state();
+    open(&mut t, r"C:\b", &[]);
+    let fx = update(
+        &mut t,
+        Msg::AdoptTab {
+            path: r"C:\a\sub".into(),
+            back: vec!["folder:home".into(), r"C:\a".into()],
+            forward: vec![],
+            index: 0,
+        },
+    );
+    assert_eq!((t.tabs.len(), t.active_tab), (2, 0));
+    assert_eq!(t.pane().location(), &Location::Dir(r"C:\a\sub".into()));
+    assert!(t.pane().history.can_go_back());
+    assert!(fx.iter().any(|e| matches!(e, Effect::Enumerate { .. })));
+    // Index trop grand : ajouté à la fin.
+    update(
+        &mut t,
+        Msg::AdoptTab {
+            path: "folder:home".into(),
+            back: vec![],
+            forward: vec![],
+            index: 99,
+        },
+    );
+    assert_eq!((t.tabs.len(), t.active_tab), (3, 2));
+    assert_eq!(t.pane().location(), &Location::Home);
+}
+
+#[test]
+fn drop_on_recycle_bin_asks_then_deletes() {
+    let mut s = state();
+    let items = vec![PathBuf::from(r"C:\a\x.txt")];
+    s.settings.confirm_delete = true;
+    assert!(update(&mut s, Msg::DropToRecycleBin(items.clone())).is_empty());
+    assert!(matches!(&s.dialog,
+        Some(Dialog::ConfirmDelete { items: i, permanent: false }) if i == &items));
+    s.dialog = None;
+    s.settings.confirm_delete = false;
+    let fx = update(&mut s, Msg::DropToRecycleBin(items.clone()));
+    assert!(matches!(job(&fx),
+        Job::File(FileOp::Delete { items: i, permanent: false }) if i == &items));
+}
+
+#[test]
 fn dual_pane_toggle_and_open_in_other_pane() {
     let mut s = state();
     open(&mut s, r"C:\a", &[("sub", true)]);

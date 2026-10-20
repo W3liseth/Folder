@@ -749,7 +749,16 @@ télémétrie distante.
 
 ### 11.1 Fonctionnalités livrées
 
-- **Navigation** : onglets (dupliquer, rouvrir le dernier fermé), historique par volet,
+- **Navigation** : onglets (dupliquer, rouvrir le dernier fermé, glisser : l'onglet reste
+  attaché au pointeur au point saisi, curseur normal ; dans la barre les autres s'écartent
+  et l'ordre change au relâchement ; tiré hors de la barre il flotte et, relâché, part dans
+  une nouvelle fenêtre de même taille, son onglet sous le pointeur :
+  `folder.exe --rect G,H,D,B <emplacement>`, ou, lâché sur la barre d'onglets d'une autre
+  fenêtre folder, la rejoint ; seul onglet de sa fenêtre, c'est la fenêtre entière qui suit
+  le pointeur (restaurée si elle était agrandie), masquée au-dessus de la barre d'une autre
+  fenêtre, et qui s'y fond au relâchement en se fermant sans enregistrer sa session ; suivi maison, `egui::DragAndDrop` imposant le curseur « saisie »,
+  flèche multidirectionnelle sous Windows),
+  historique par volet,
   omnibar (fil d'Ariane cliquable, édition du chemin), page d'accueil (accès rapide,
   lecteurs avec jauge, étiquettes, fichiers récents), barre latérale (accueil, accès rapide
   avec la corbeille, lecteurs, réseau, distributions WSL lues dans le registre, étiquettes ;
@@ -839,9 +848,16 @@ télémétrie distante.
 - **Étiquettes** : icône d'étiquette colorée (barre latérale, accueil, menu contextuel),
   activables dans les paramètres, ajout, suppression, couleurs proposées ou libres.
 - **Shell** : menu contextuel folder + « Afficher plus d'options » (vrai menu `IContextMenu`,
-  sous-menus dynamiques), glisser vers l'Explorateur (`SHDoDragDrop`), déposer depuis
-  l'Explorateur (sur la fenêtre, un volet ou un dossier), icônes et miniatures via
-  `IShellItemImageFactory`.
+  sous-menus dynamiques), icônes et miniatures via `IShellItemImageFactory`.
+- **Glisser-déposer** (`fx-ui::view::dnd`) : dans la fenêtre, glisser géré par folder vers
+  un dossier de la liste, le fond d'un volet, le fil d'Ariane, un onglet, la barre latérale
+  ou la Corbeille (cible surlignée, aperçu « Déplacer vers… / Copier vers… » sous le
+  pointeur ; Ctrl copie, Maj déplace, sinon selon le volume ; Échap abandonne). Le
+  glisser-déposer OLE (`SHDoDragDrop`) ne prend le relais qu'à la sortie de la fenêtre :
+  sa boucle modale fige l'interface et consomme le relâchement du bouton, qui est donc
+  renvoyé à la fenêtre ensuite (sinon plus aucun survol jusqu'au clic suivant). Dépôts venus
+  de l'Explorateur ou d'une autre fenêtre folder : mêmes cibles, suivies par la position du
+  curseur lue à Windows (aucun message de souris pendant un glisser OLE).
 - **Recherche** : filtre instantané et recherche récursive diffusée dans un dossier virtuel.
 - **Commandes** : 64 commandes avec raccourcis, palette (`Ctrl+Maj+P`), menus de la barre
   d'outils ; réglages (thème, affichage, comportement, raccourcis) ; étiquettes colorées ;
@@ -878,13 +894,33 @@ télémétrie distante.
   (`fx_win::ipc`, format `fx_store::remote`) : la fenêtre principale reste la seule à écrire
   les réglages et la base, et applique tout à chaud ; réouverte au premier plan si déjà là,
   fermée avec la fenêtre principale (un thread attend la fin de son processus).
+- **Onglets entre fenêtres** (`fx-ui::view::peer`) : chaque fenêtre est un processus et
+  celle d'où part le glisser garde la souris (capture). Elle repère l'autre fenêtre sous le
+  curseur (plus haute fenêtre visible qui couvre le point dans l'ordre d'`EnumWindows`, la
+  sienne exclue puisqu'elle peut suivre le pointeur ; même titre et même classe) et lui
+  envoie par `WM_COPYDATA`
+  (`fx_store::remote` : `TabHover`, `TabHoverEnd`, `TabDrop`) la position du pointeur au
+  survol de sa barre (au moins toutes les 150 ms : l'aperçu expire après 400 ms sans
+  nouvelles), puis l'onglet au relâchement (emplacement et historique du volet). La cible
+  montre l'onglet exactement comme un des siens qu'on glisse (sous le pointeur au point de
+  saisie transmis, les autres s'écartant selon la même règle), puis l'insère à cette place,
+  l'active et le fait glisser depuis l'endroit du dépôt (sans animation d'apparition). La
+  fenêtre qui suit le pointeur (onglet unique) est déplacée par `SetWindowPos` à chaque
+  image, demandée en continu le temps du glisser (le pointeur restant immobile dans la
+  fenêtre, winit n'envoie plus d'événement), et masquée par DWM (`DWMWA_CLOAK` : toujours
+  visible pour Windows, capture et contenu conservés) au-dessus de la barre de la cible.
+  `fx_win::ipc::send` attend au plus une seconde (`SendMessageTimeoutW`, abandon si la
+  fenêtre est figée).
 - **Fenêtre Propriétés** : second processus plutôt que second viewport (le moteur CPU vendu
   ne gère qu'une fenêtre) ; `fx-ui` dépend donc aussi de `fx-fs` (calcul de taille) pour
   cette mini-application, qui ne passe pas par `fx-app`.
 - **Thread UI** (§6, CLAUDE.md) : trois appels Win32 restent sur le thread UI parce qu'ils
   l'exigent — menu contextuel shell (`TrackPopupMenuEx`), glisser vers l'extérieur
   (`SHDoDragDrop`, boucle modale OLE) et attributs DWM du cadre. `fx-ui` dépend donc de
-  `fx-win` pour ces trois appels seulement.
+  `fx-win` pour ces trois appels, et pour la position du curseur pendant un glisser OLE
+  (`GetCursorPos`, non bloquant) ainsi que pour les onglets glissés d'une fenêtre à l'autre
+  (fenêtre sous le curseur, `WM_COPYDATA` borné à une seconde, déplacement et masquage de
+  la fenêtre).
 - **Threads** (§6.2) : 12 au total — UI, pool I/O (2), worker shell STA (icônes, miniatures
   en LIFO, actions shell), watcher IOCP, threads du moteur et du système. Les opérations
   fichiers, la recherche et les boîtes modales natives utilisent un thread temporaire qui
@@ -936,7 +972,7 @@ télémétrie distante.
 | Défilement 3840×2160, p95 (hors écran, `renderbench`) | 3,8–6,9 ms | ≤ 8 ms ✓ |
 | Exécutable | 11,4 Mo | ≤ 15 Mo ✓ |
 
-Tests : `cargo test --workspace` (117 tests, dont la comparaison rendu partiel / rendu
+Tests : `cargo test --workspace` (120 tests, dont la comparaison rendu partiel / rendu
 complet) ; `clippy -D warnings` propre, y compris avec la feature `wgpu`.
 
 ### 11.4 Reste à faire

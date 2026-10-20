@@ -365,10 +365,13 @@ impl Scheduler {
                 let (paths, db) = (self.paths.clone(), self.db.clone());
                 self.io(move || persist(&paths, &db, p, &out));
             }
-            Effect::NewWindow(dir) => {
+            Effect::NewWindow { start, rect } => {
                 if let Ok(exe) = std::env::current_exe() {
                     let mut cmd = std::process::Command::new(exe);
-                    if let Some(d) = dir {
+                    if let Some([l, t, r, b]) = rect {
+                        cmd.arg("--rect").arg(format!("{l},{t},{r},{b}"));
+                    }
+                    if let Some(d) = start {
                         cmd.arg(d);
                     }
                     if cmd.spawn().is_err() {

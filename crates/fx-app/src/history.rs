@@ -77,6 +77,17 @@ impl Location {
         }
     }
 
+    /// Argument de `folder.exe` qui ouvre une fenêtre sur cet emplacement (relu par
+    /// [`Location::from_path`]) : une recherche rouvre son dossier, une étiquette l'accueil.
+    pub fn window_arg(&self) -> PathBuf {
+        match self {
+            Self::Search { root, .. } => root.clone(),
+            _ => self
+                .history_path()
+                .unwrap_or_else(|| PathBuf::from(HOME_ID)),
+        }
+    }
+
     /// Entrée d'historique sauvegardée : comme [`Location::session_path`], accueil compris.
     fn history_path(&self) -> Option<PathBuf> {
         match self {

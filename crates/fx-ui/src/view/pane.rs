@@ -239,6 +239,9 @@ fn empty_area(ui: &mut Ui, f: &mut Fx<'_>, pane: PaneId) {
     if r.clicked() || r.secondary_clicked() {
         f.send(Msg::FocusPane(pane));
     }
+    if let Some(Location::Dir(dir)) = f.state.find_pane(pane).map(Pane::location) {
+        super::dnd::pane_zone(f, rect, dir);
+    }
     r.context_menu(|ui| super::menus::background_menu(ui, f));
 }
 

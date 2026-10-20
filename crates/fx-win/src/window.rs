@@ -277,6 +277,171 @@ pub fn cursor_pos() -> (i32, i32) {
     (p.x, p.y)
 }
 
+/// Position du curseur dans la zone client de `hwnd` (pixels physiques, éventuellement hors
+/// de la fenêtre). Sert pendant un glisser-déposer OLE, où la fenêtre ne reçoit aucun
+/// message de souris.
+pub fn client_cursor_pos(hwnd: isize) -> Option<(i32, i32)> {
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    let mut p = POINT::default();
+    // SAFETY: `p` est une POINT valide ; un HWND invalide fait échouer la conversion.
+    unsafe {
+        GetCursorPos(&mut p).ok()?;
+        ScreenToClient(HWND(hwnd as *mut _), &mut p).ok().ok()?;
+    }
+    Some((p.x, p.y))
+}
+
+/// Termine, pour la fenêtre, un glisser commencé chez elle et achevé par une boucle modale
+/// (`SHDoDragDrop`) : celle-ci consomme le relâchement du bouton, que la fenêtre croirait
+/// donc toujours enfoncé (plus aucun survol jusqu'au clic suivant). On lui envoie la
+/// position actuelle du curseur puis le relâchement du bouton gauche.
+pub fn end_mouse_drag(hwnd: isize) {
+    use windows::Win32::Foundation::WPARAM;
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_LBUTTONUP, WM_MOUSEMOVE};
+    let (x, y) = client_cursor_pos(hwnd).unwrap_or((-1, -1));
+    // MAKELPARAM : coordonnées signées sur 16 bits (négatives hors de la fenêtre).
+    let lparam = LPARAM(((y as u16 as u32) << 16 | x as u16 as u32) as isize);
+    let hwnd = Some(HWND(hwnd as *mut _));
+    // SAFETY: messages postés (asynchrones) à notre propre fenêtre, sans pointeur.
+    unsafe {
+        let _ = PostMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), lparam);
+        let _ = PostMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), lparam);
+    }
+}
+
+/// Autre fenêtre principale de folder (autre processus) visible au point écran (`x`, `y`) :
+/// la plus haute des fenêtres qui le couvrent, `own` exclue (elle peut être sous le pointeur
+/// pendant qu'on la déplace), si elle a le titre et la classe de `own`.
+pub fn peer_at(own: isize, x: i32, y: i32) -> Option<isize> {
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+    let mut find = Find {
+        own: HWND(own as *mut _),
+        pt: POINT { x, y },
+        found: None,
+    };
+    // SAFETY: le rappel ne vit que pendant l'appel et n'accède à `find` que via LPARAM.
+    unsafe {
+        let _ = EnumWindows(Some(topmost_at), LPARAM((&raw mut find) as isize));
+    }
+    let top = find.found?;
+    (text_of(top, false) == text_of(find.own, false)
+        && text_of(top, true) == text_of(find.own, true))
+    .then_some(top.0 as isize)
+}
+
+struct Find {
+    own: HWND,
+    pt: POINT,
+    found: Option<HWND>,
+}
+
+/// `EnumWindows` parcourt les fenêtres de haut en bas : la première visible qui couvre le
+/// point est celle qu'on voit. Ignorées : fenêtres cachées, réduites, masquées par DWM
+/// (autres bureaux virtuels, applications suspendues) ou transparentes aux clics.
+unsafe extern "system" fn topmost_at(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, WS_EX_TRANSPARENT,
+    };
+    // SAFETY: LPARAM pointe vers la `Find` de `peer_at`, vivante pendant l'énumération.
+    let find = unsafe { &mut *(lparam.0 as *mut Find) };
+    if hwnd == find.own {
+        return true.into();
+    }
+    let mut r = RECT::default();
+    let mut cloaked = 0u32;
+    // SAFETY: HWND fourni par le système ; sorties locales de la bonne taille.
+    let visible = unsafe {
+        IsWindowVisible(hwnd).as_bool()
+            && !IsIconic(hwnd).as_bool()
+            && GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT.0 as isize == 0
+            && DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), 4).is_ok()
+            && cloaked == 0
+            && GetWindowRect(hwnd, &mut r).is_ok()
+    };
+    let p = find.pt;
+    if visible && p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom {
+        find.found = Some(hwnd);
+        return false.into();
+    }
+    true.into()
+}
+
+/// Déplace la fenêtre (coin haut gauche en pixels écran), sans la redimensionner ni changer
+/// son rang ou son activation.
+pub fn move_to(hwnd: isize, x: i32, y: i32) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    };
+    // SAFETY: HWND de notre fenêtre ; un échec est sans conséquence.
+    let _ = unsafe {
+        SetWindowPos(
+            HWND(hwnd as *mut _),
+            None,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+}
+
+/// Masque (ou réaffiche) la fenêtre à l'écran par DWM : elle reste « visible » pour Windows
+/// et winit, garde la capture de la souris et son contenu (rien à redessiner ensuite).
+pub fn set_cloaked(hwnd: isize, cloaked: bool) {
+    use windows::Win32::Graphics::Dwm::DWMWA_CLOAK;
+    let value = BOOL::from(cloaked);
+    // SAFETY: attribut DWM documenté, valeur locale de la bonne taille.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            HWND(hwnd as *mut _),
+            DWMWA_CLOAK,
+            (&raw const value).cast(),
+            4,
+        )
+    };
+}
+
+/// Titre (ou nom de classe si `class`) d'une fenêtre, tronqué à 128 caractères.
+fn text_of(hwnd: HWND, class: bool) -> Vec<u16> {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let mut buf = [0u16; 128];
+    // SAFETY: HWND quelconque (échec → 0), tampon local.
+    let n = unsafe {
+        if class {
+            GetClassNameW(hwnd, &mut buf)
+        } else {
+            GetWindowTextW(hwnd, &mut buf)
+        }
+    };
+    buf[..usize::try_from(n).unwrap_or(0)].to_vec()
+}
+
+/// Facteur d'échelle d'une fenêtre (1.0 à 96 ppp).
+pub fn scale_of(hwnd: isize) -> f32 {
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    // SAFETY: lecture ; un HWND invalide donne 0.
+    let dpi = unsafe { GetDpiForWindow(HWND(hwnd as *mut _)) };
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+}
+
+/// Ramène une fenêtre au premier plan (restaurée si réduite). Réussit depuis le processus
+/// qui a le premier plan, celui où l'utilisateur vient d'agir.
+pub fn bring_to_front(hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+    let hwnd = HWND(hwnd as *mut _);
+    // SAFETY: HWND quelconque ; les échecs sont sans conséquence.
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
 /// OLE sur le thread UI (glisser-déposer, presse-papiers OLE). Idempotent.
 pub fn init_ole() {
     // SAFETY: pas de pointeur réservé ; S_FALSE si déjà initialisé (winit le fait aussi).

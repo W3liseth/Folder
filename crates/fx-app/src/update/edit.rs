@@ -136,6 +136,12 @@ pub fn delete(state: &mut AppState, permanent: bool) -> Vec<Effect> {
         return vec![];
     }
     let items = state.pane().selected_paths();
+    delete_items(state, items, permanent)
+}
+
+/// Supprime `items` (corbeille ou définitivement), après confirmation si les réglages la
+/// demandent (toujours pour une suppression définitive).
+pub fn delete_items(state: &mut AppState, items: Vec<PathBuf>, permanent: bool) -> Vec<Effect> {
     if items.is_empty() {
         return vec![];
     }
@@ -233,6 +239,12 @@ fn same_volume(a: &Path, b: &Path) -> bool {
     root(a) == root(b)
 }
 
+/// Un dépôt sans touche de modification copie-t-il (plutôt que déplacer) ? Comme
+/// l'Explorateur : déplacement si tout vient du même volume que `dest`, copie sinon.
+pub fn drop_copies(sources: &[PathBuf], dest: &Path) -> bool {
+    !sources.iter().all(|s| same_volume(s, dest))
+}
+
 pub fn drop_paths(
     state: &mut AppState,
     dest: PathBuf,
@@ -247,7 +259,7 @@ pub fn drop_paths(
     if sources.is_empty() {
         return vec![];
     }
-    let copy = copy.unwrap_or_else(|| !sources.iter().all(|s| same_volume(s, &dest)));
+    let copy = copy.unwrap_or_else(|| drop_copies(&sources, &dest));
     state.pending_select = sources
         .iter()
         .filter_map(|s| s.file_name().map(|n| dest.join(n)))

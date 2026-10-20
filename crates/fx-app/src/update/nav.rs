@@ -63,7 +63,8 @@ pub fn startup(
         }
         None => {
             let id = state.pane().id;
-            let loc = start.map_or(Location::Home, Location::Dir);
+            // Accueil, Corbeille, Réseau… aussi (nouvelle fenêtre, onglet détaché).
+            let loc = start.map_or(Location::Home, Location::from_path);
             fx.extend(load(state, id, loc, false));
         }
     }
@@ -267,6 +268,16 @@ pub fn close_tab(state: &mut AppState, i: usize) -> Vec<Effect> {
         let id = state.pane().id;
         return load(state, id, Location::Home, true);
     }
+    let (tab, fx) = remove_tab(state, i);
+    state.closed_tabs.push(tab.active_pane().location().clone());
+    if state.closed_tabs.len() > MAX_CLOSED_TABS {
+        state.closed_tabs.remove(0);
+    }
+    fx
+}
+
+/// Retire l'onglet `i` (il en reste au moins un autre) et arrête ses chargements.
+fn remove_tab(state: &mut AppState, i: usize) -> (crate::state::Tab, Vec<Effect>) {
     let tab = state.tabs.remove(i);
     let mut fx = Vec::new();
     for p in &tab.panes {
@@ -275,13 +286,51 @@ pub fn close_tab(state: &mut AppState, i: usize) -> Vec<Effect> {
         }
         fx.push(Effect::Unwatch { key: p.id.0 });
     }
-    state.closed_tabs.push(tab.active_pane().location().clone());
-    if state.closed_tabs.len() > MAX_CLOSED_TABS {
-        state.closed_tabs.remove(0);
-    }
     if state.active_tab >= i && state.active_tab > 0 {
         state.active_tab -= 1;
     }
+    (tab, fx)
+}
+
+/// Onglet parti dans une autre fenêtre : retiré (sans réouverture possible ici). Le
+/// dernier onglet ne passe pas par là : sa fenêtre se ferme.
+pub fn remove_moved_tab(state: &mut AppState, i: usize) -> Vec<Effect> {
+    if i >= state.tabs.len() || state.tabs.len() == 1 {
+        return vec![];
+    }
+    remove_tab(state, i).1
+}
+
+/// Onglet venu d'une autre fenêtre : nouvel onglet en `index` (borné), activé, avec
+/// l'historique de son volet d'origine.
+pub fn adopt_tab(
+    state: &mut AppState,
+    path: PathBuf,
+    back: &[PathBuf],
+    forward: &[PathBuf],
+    index: usize,
+) -> Vec<Effect> {
+    let loc = Location::from_path(path);
+    let mut tab = state.new_tab(loc.clone());
+    tab.panes[0].history = History::restored(loc.clone(), back, forward);
+    let pane = tab.panes[0].id;
+    let index = index.min(state.tabs.len());
+    state.tabs.insert(index, tab);
+    state.active_tab = index;
+    load(state, pane, loc, false)
+}
+
+/// Onglet lâché hors de la barre : il quitte cette fenêtre pour une nouvelle, ouverte sur
+/// son emplacement. Le dernier onglet reste (la fenêtre serait vide).
+pub fn detach_tab(state: &mut AppState, i: usize, rect: Option<[i32; 4]>) -> Vec<Effect> {
+    if i >= state.tabs.len() || state.tabs.len() == 1 {
+        return vec![];
+    }
+    let (tab, mut fx) = remove_tab(state, i);
+    fx.push(Effect::NewWindow {
+        start: Some(tab.active_pane().location().window_arg()),
+        rect,
+    });
     fx
 }
 

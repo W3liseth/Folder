@@ -1,11 +1,11 @@
 //! Messages entre fenêtres folder de processus différents (fenêtre Paramètres → fenêtre
-//! principale) par `WM_COPYDATA` : pas de thread ni de canal nommé à ouvrir, le message
-//! arrive dans la boucle de la fenêtre principale.
+//! principale, onglet glissé d'une fenêtre principale à une autre) par `WM_COPYDATA` : pas
+//! de thread ni de canal nommé à ouvrir, le message arrive dans la boucle de la fenêtre.
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_COPYDATA};
+use windows::Win32::UI::WindowsAndMessaging::{SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_COPYDATA};
 
 /// Signature des messages folder (« fold »), pour ignorer tout autre `WM_COPYDATA`.
 const MAGIC: usize = 0x666F_6C64;
@@ -13,23 +13,28 @@ const SUBCLASS_ID: usize = 0x666F_6C65;
 
 type Sink = Box<dyn Fn(Vec<u8>)>;
 
-/// Envoie `data` à la fenêtre `hwnd` (bloquant jusqu'à son traitement) ; vrai si accepté.
+/// Envoie `data` à la fenêtre `hwnd` (bloquant jusqu'à son traitement, au plus une
+/// seconde : une fenêtre figée ne bloque pas l'expéditeur) ; vrai si accepté.
 pub fn send(hwnd: isize, data: &[u8]) -> bool {
     let cds = COPYDATASTRUCT {
         dwData: MAGIC,
         cbData: data.len() as u32,
         lpData: data.as_ptr() as *mut _,
     };
+    let mut result = 0usize;
     // SAFETY: la structure et les données vivent pendant l'appel synchrone.
     let r = unsafe {
-        SendMessageW(
+        SendMessageTimeoutW(
             HWND(hwnd as *mut _),
             WM_COPYDATA,
-            Some(WPARAM(0)),
-            Some(LPARAM((&raw const cds) as isize)),
+            WPARAM(0),
+            LPARAM((&raw const cds) as isize),
+            SMTO_ABORTIFHUNG,
+            1000,
+            Some(&raw mut result),
         )
     };
-    r.0 != 0
+    r.0 != 0 && result != 0
 }
 
 /// Reçoit les messages folder adressés à `hwnd` (fenêtre du thread courant) : `sink` est

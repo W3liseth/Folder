@@ -34,6 +34,23 @@ pub enum Msg {
         from: usize,
         to: usize,
     },
+    /// Onglet lâché hors de la barre d'onglets : il part dans une nouvelle fenêtre placée en
+    /// `rect` (pixels physiques). Sans effet s'il est le seul onglet.
+    DetachTab {
+        index: usize,
+        rect: Option<[i32; 4]>,
+    },
+    /// Onglet parti dans une autre fenêtre folder : retiré sans être proposé à la
+    /// réouverture.
+    RemoveTab(usize),
+    /// Onglet venu d'une autre fenêtre folder, inséré en `index` et activé : emplacement et
+    /// historique de son volet (cf. `Location::window_arg`, `History::saved`).
+    AdoptTab {
+        path: PathBuf,
+        back: Vec<PathBuf>,
+        forward: Vec<PathBuf>,
+        index: usize,
+    },
     FocusPane(PaneId),
     /// Ouvre un fichier avec son application par défaut (ou navigue si c'est un dossier).
     OpenPath(PathBuf),
@@ -99,6 +116,9 @@ pub enum Msg {
         paths: Vec<PathBuf>,
         copy: Option<bool>,
     },
+    /// Fichiers déposés sur la Corbeille : envoyés à la corbeille (après confirmation si
+    /// elle est demandée dans les réglages).
+    DropToRecycleBin(Vec<PathBuf>),
     ConfirmDialog,
     CancelDialog,
     ShowAbout,

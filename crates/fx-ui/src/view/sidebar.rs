@@ -274,6 +274,8 @@ fn recycle_bin(ui: &mut Ui, f: &mut Fx<'_>, current: &Location) {
         *current == Location::RecycleBin,
         None,
     );
+    // Dépôt sur la Corbeille : envoi à la corbeille, comme dans l'Explorateur.
+    super::dnd::zone(f, r.rect, super::dnd::Target::RecycleBin);
     if r.clicked() {
         f.send(Msg::Navigate(Location::RecycleBin));
     }
@@ -392,19 +394,8 @@ fn row_with_gauge(
     if !ui.is_rect_visible(rect) {
         return r;
     }
-    let hovering_files = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
-    if let Some(d) = drop
-        && hovering_files
-        && r.contains_pointer()
-    {
-        ui.ctx()
-            .data_mut(|m| m.insert_temp(Id::unique("fx-drop-target"), d.to_path_buf()));
-        ui.painter().rect_stroke(
-            rect,
-            4.0,
-            egui::Stroke::new(1.0, pal.accent),
-            egui::StrokeKind::Inside,
-        );
+    if let Some(d) = drop {
+        super::dnd::zone(f, rect, super::dnd::Target::Dir(d.to_path_buf()));
     }
     if active {
         f.vs.sidebar_active = Some(rect);

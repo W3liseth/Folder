@@ -92,9 +92,10 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             Some(loc) => nav::open_tab(state, loc),
             None => vec![],
         },
-        NewWindow => vec![Effect::NewWindow(
-            state.pane().working_dir().map(Path::to_path_buf),
-        )],
+        NewWindow => vec![Effect::NewWindow {
+            start: Some(state.pane().location().window_arg()),
+            rect: None,
+        }],
         ToggleDualPane => {
             let loc = state.pane().location().clone();
             if state.tab().panes.len() > 1 {

@@ -88,7 +88,7 @@ Installeur Windows (Inno Setup 6 requis). En CI, `.github/workflows/installer.ym
 la release `v<version>` dès que la version de `[workspace.package]` (Cargo.toml) change sur `main` :
 
 ```bash
-iscc /DAppVersion=0.1.0 installer/folder.iss
+iscc /DAppVersion=0.2.0 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :

@@ -222,11 +222,16 @@ pub fn interact(
             }),
         }
     }
-    // Glisser vers l'Explorateur, le bureau, un autre volet… (glisser-déposer OLE natif).
-    if ui.input(|i| i.pointer.primary_pressed()) {
-        f.vs.drag_cooldown = false;
-    }
-    if resp.drag_started() && !f.vs.drag_cooldown && f.vs.band.is_none() {
+    // Glisser vers un dossier, la barre latérale, un onglet… puis, hors de la fenêtre, vers
+    // l'Explorateur ou le bureau (cf. `dnd`). Seulement depuis de vrais dossiers : les
+    // éléments de la Corbeille et du Réseau ne sont pas des fichiers déplaçables.
+    let real_files = f.state.find_pane(pane).is_some_and(|p| {
+        matches!(
+            p.location(),
+            fx_app::Location::Dir(_) | fx_app::Location::Search { .. } | fx_app::Location::Tag(_)
+        )
+    });
+    if resp.drag_started_by(egui::PointerButton::Primary) && real_files && f.vs.band.is_none() {
         let paths = if selected {
             f.state
                 .find_pane(pane)
@@ -235,27 +240,10 @@ pub fn interact(
         } else {
             vec![path.clone()]
         };
-        if let (Some(hwnd), false) = (f.vs.hwnd, paths.is_empty()) {
-            f.vs.drag_cooldown = true;
-            // Modal jusqu'au dépôt ; si la cible est fx, le dépôt revient par `dropped_files`.
-            if let Err(e) = fx_win::ctxmenu::drag_out(hwnd, &paths) {
-                f.send(Msg::Error(format!(
-                    "Glisser-déposer impossible : {}",
-                    e.message().trim()
-                )));
-            }
-        }
+        super::dnd::start(f, paths, is_dir);
     }
-    // Dépôt de fichiers externes sur un dossier.
-    if is_dir && resp.contains_pointer() && ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
-        ui.ctx()
-            .data_mut(|d| d.insert_temp(Id::unique("fx-drop-target"), path.clone()));
-        ui.painter().rect_stroke(
-            resp.rect,
-            4.0,
-            egui::Stroke::new(1.5, f.pal.accent),
-            egui::StrokeKind::Inside,
-        );
+    if is_dir {
+        super::dnd::zone(f, resp.rect, super::dnd::Target::Dir(path.clone()));
     }
     let paths_for_menu = |f: &Fx<'_>| -> Vec<PathBuf> {
         if selected {

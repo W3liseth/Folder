@@ -78,6 +78,8 @@ pub struct Options {
     pub renderer: Renderer,
     /// Taille intérieure visée en pixels physiques (mesures), sinon 1200×780 points.
     pub window_px: Option<[u32; 2]>,
+    /// Placement imposé (gauche, haut, droite, bas en pixels physiques) : onglet détaché.
+    pub rect: Option<[i32; 4]>,
 }
 
 pub type Error = Box<dyn std::error::Error>;
@@ -222,9 +224,16 @@ impl Core {
             owner_set: false,
             last_session_save: Instant::now(),
             // En mode mesure, taille imposée : pas de placement restauré.
-            placement: session
-                .as_ref()
-                .and_then(|s| s.placement)
+            placement: opts
+                .rect
+                .map(|[left, top, right, bottom]| fx_store::WindowPlacement {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    maximized: false,
+                })
+                .or_else(|| session.as_ref().and_then(|s| s.placement))
                 .filter(|_| opts.bench == BenchMode::Off && opts.window_px.is_none()),
             shown: false,
             remote: crossbeam_channel::unbounded(),
@@ -357,8 +366,12 @@ impl Core {
 
     /// Message de la fenêtre Paramètres. Les dimensions propres à cette fenêtre (barre
     /// latérale, colonnes, épingles) ne sont pas modifiables là-bas : on garde les nôtres.
-    fn remote_msg(&self, bytes: &[u8]) -> Option<Msg> {
-        Some(match fx_store::remote::Remote::decode(bytes)? {
+    fn remote_msg(&mut self, bytes: &[u8]) -> Option<Msg> {
+        // Onglet glissé depuis une autre fenêtre : traité par la vue (aperçu, insertion).
+        let msg = self
+            .view
+            .receive_peer(fx_store::remote::Remote::decode(bytes)?)?;
+        Some(match msg {
             fx_store::remote::Remote::Settings(mut s) => {
                 let cur = &self.state.settings;
                 s.sidebar_width = cur.sidebar_width;
@@ -373,6 +386,9 @@ impl Core {
             }
             fx_store::remote::Remote::SaveTag(t) => Msg::SaveTag(t),
             fx_store::remote::Remote::DeleteTag(id) => Msg::DeleteTag(id),
+            fx_store::remote::Remote::TabHover { .. }
+            | fx_store::remote::Remote::TabHoverEnd
+            | fx_store::remote::Remote::TabDrop { .. } => return None,
         })
     }
 
@@ -392,7 +408,8 @@ impl Core {
     }
 
     fn on_exit(&mut self) {
-        if self.bench.is_none() {
+        // Fenêtre fondue dans une autre : sa session (vide de sens) ne remplace pas la leur.
+        if self.bench.is_none() && !self.view.merged_away() {
             self.scheduler.save_session_now(&self.session());
         }
     }

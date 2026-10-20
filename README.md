@@ -103,12 +103,12 @@ sont décrits dans [CLAUDE.md](CLAUDE.md).
 
 La version de folder est celle de `[workspace.package]` dans [Cargo.toml](Cargo.toml).
 
-1. Change la version, par exemple `version = "0.2.0"`.
+1. Change la version, par exemple `version = "0.3.0"`.
 2. Pousse le commit sur `main`.
 
 Le workflow [Installeur](.github/workflows/installer.yml) construit alors l'installeur et
-crée la release `v0.2.0`, avec le tag sur ce commit et les notes générées à partir des
-changements. Une version avec suffixe, comme `0.2.0-beta.1`, est publiée en préversion.
+crée la release `v0.3.0`, avec le tag sur ce commit et les notes générées à partir des
+changements. Une version avec suffixe, comme `0.3.0-beta.1`, est publiée en préversion.
 Si la release existe déjà, rien n'est publié. Lancé à la main depuis l'onglet Actions, le
 workflow crée la release qui manque, ou construit seulement l'installeur.
 
@@ -116,7 +116,7 @@ Pour construire l'installeur en local, installe [Inno Setup 6](https://jrsoftwar
 puis lance :
 
 ```bash
-iscc /DAppVersion=0.1.0 installer/folder.iss
+iscc /DAppVersion=0.2.0 installer/folder.iss
 ```
 
 L'installeur est écrit dans `target\installer`.

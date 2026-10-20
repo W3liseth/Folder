@@ -16,6 +16,7 @@ Options :
   --bench-nav DOSSIER        mesures de démarrage et de navigation (lignes FX_BENCH sur stdout)
   --bench-scroll DOSSIER     mesure des temps d'image en défilement continu
   --size LxH                 taille intérieure visée en pixels physiques (mesures)
+  --rect G,H,D,B             placement de la fenêtre en pixels physiques (onglet détaché)
 
 Variables : FOLDER_LOG=<filtre tracing> (défaut : warn), FOLDER_RENDERER";
 
@@ -79,6 +80,7 @@ fn main() -> ExitCode {
         process_start,
         renderer: args.renderer.unwrap_or_else(Renderer::from_env),
         window_px: args.size,
+        rect: args.rect,
     };
     match fx_ui::run(opts) {
         Ok(()) => ExitCode::SUCCESS,
@@ -96,6 +98,7 @@ struct Args {
     bench: BenchMode,
     renderer: Option<Renderer>,
     size: Option<[u32; 2]>,
+    rect: Option<[i32; 4]>,
 }
 
 impl Default for Args {
@@ -105,6 +108,7 @@ impl Default for Args {
             bench: BenchMode::Off,
             renderer: None,
             size: None,
+            rect: None,
         }
     }
 }
@@ -137,6 +141,18 @@ fn parse_args(mut it: impl Iterator<Item = OsString>) -> Result<Args, String> {
                         .map_err(|_| format!("taille invalide : {v}"))
                 };
                 args.size = Some([px(w)?, px(h)?]);
+            }
+            Some("--rect") => {
+                let v = value("--rect")?.to_string_lossy().into_owned();
+                let n: Vec<i32> = v
+                    .split(',')
+                    .map(|s| s.trim().parse::<i32>())
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| format!("placement invalide : {v}"))?;
+                match n[..] {
+                    [l, t, r, b] if r > l && b > t => args.rect = Some([l, t, r, b]),
+                    _ => return Err(format!("--rect attend G,H,D,B : {v}")),
+                }
             }
             Some(s) if s.starts_with("--") => return Err(format!("option inconnue : {s}")),
             _ if args.dir.is_none() => args.dir = Some(a.into()),
@@ -186,6 +202,12 @@ mod tests {
         assert!(parse(&["--bench-nav"]).is_err());
         assert!(parse(&["--renderer", "vulkan"]).is_err());
         assert!(parse(&["--size", "big"]).is_err());
+        assert_eq!(
+            parse(&["--rect", "-10,20,1190,800", "folder:home"]).map(|a| (a.rect, a.dir)),
+            Ok((Some([-10, 20, 1190, 800]), Some("folder:home".into())))
+        );
+        assert!(parse(&["--rect", "1,2,3"]).is_err());
+        assert!(parse(&["--rect", "10,10,5,20"]).is_err());
         assert!(parse(&["--nope"]).is_err());
     }
 }

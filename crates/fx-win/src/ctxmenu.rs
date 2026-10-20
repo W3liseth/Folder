@@ -286,7 +286,9 @@ pub fn drag_out(hwnd: isize, items: &[PathBuf]) -> Result<DropResult> {
             allowed,
         )
     }
-    .op("SHDoDragDrop")?;
+    .op("SHDoDragDrop");
+    crate::window::end_mouse_drag(hwnd);
+    let effect = effect?;
     Ok(if effect.0 & DROPEFFECT_MOVE.0 != 0 {
         DropResult::Move
     } else if effect.0 & DROPEFFECT_COPY.0 != 0 {

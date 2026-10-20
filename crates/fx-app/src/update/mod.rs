@@ -14,6 +14,7 @@ use crate::history::Location;
 use crate::msg::Msg;
 use crate::state::{AppState, sort_key_id};
 
+pub use edit::drop_copies;
 pub use nav::sort_indicator;
 
 pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
@@ -35,6 +36,14 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             nav::after_selection(state)
         }
         Msg::CloseTab(i) => nav::close_tab(state, i),
+        Msg::DetachTab { index, rect } => nav::detach_tab(state, index, rect),
+        Msg::RemoveTab(i) => nav::remove_moved_tab(state, i),
+        Msg::AdoptTab {
+            path,
+            back,
+            forward,
+            index,
+        } => nav::adopt_tab(state, path, &back, &forward, index),
         Msg::MoveTab { from, to } => {
             if from < state.tabs.len() && to < state.tabs.len() && from != to {
                 let t = state.tabs.remove(from);
@@ -118,6 +127,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::DropPaths { dest, paths, copy } => edit::drop_paths(state, dest, paths, copy),
+        Msg::DropToRecycleBin(items) => edit::delete_items(state, items, false),
         Msg::ConfirmDialog => edit::confirm_dialog(state),
         Msg::CancelDialog => {
             state.dialog = None;

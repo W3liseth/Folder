@@ -304,10 +304,7 @@ fn crumbs(ui: &mut Ui, f: &mut Fx<'_>, path: &Path, max_w: f32) {
             f.send(Msg::OpenInNewTab(Location::Dir(p.clone())));
         }
         // Dépôt sur un segment : copie ou déplacement vers ce dossier.
-        if r.contains_pointer() && ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
-            ui.ctx()
-                .data_mut(|d| d.insert_temp(Id::unique("fx-drop-target"), p.clone()));
-        }
+        super::dnd::zone(f, r.rect, super::dnd::Target::Dir(p.clone()));
         r.context_menu(|ui| {
             if ui.button("Ouvrir dans un nouvel onglet").clicked() {
                 f.send(Msg::OpenInNewTab(Location::Dir(p.clone())));

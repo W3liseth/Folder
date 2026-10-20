@@ -2,11 +2,13 @@
 //!
 //! Exceptions documentées (appels Win32 obligatoirement sur le thread UI) : style DWM de la
 //! fenêtre, menu contextuel shell (`TrackPopupMenuEx`) et glisser-déposer sortant
-//! (`SHDoDragDrop`), tous deux modaux.
+//! (`SHDoDragDrop`), tous deux modaux ; position du curseur pendant un glisser OLE (cf.
+//! [`dnd`]).
 
 mod columns;
 mod diagnostics;
 mod dialogs;
+mod dnd;
 mod grid;
 mod home;
 mod items;
@@ -17,6 +19,7 @@ mod menus;
 mod navbar;
 mod palette;
 mod pane;
+mod peer;
 mod preview;
 mod search;
 pub(crate) mod settings;
@@ -89,9 +92,8 @@ pub struct ViewState {
     pub(crate) scroll: HashMap<PaneId, Scroll>,
     pub(crate) rename: Option<(u64, String)>,
     pub(crate) band: Option<Band>,
-    /// Après un glisser-déposer sortant, la relâche du bouton n'arrive pas à la fenêtre :
-    /// on ignore les glissements jusqu'au prochain appui.
-    pub(crate) drag_cooldown: bool,
+    /// Glisser-déposer de fichiers en cours et cibles de dépôt.
+    pub(crate) dnd: dnd::DndState,
     pub(crate) shell_menu: Option<(ShellMenu, (i32, i32), bool)>,
     pub(crate) palette_query: String,
     pub(crate) palette_index: usize,
@@ -112,6 +114,10 @@ pub struct ViewState {
     pub(crate) slow_click: Option<SlowClick>,
     /// Transition de contenu par volet : `(contenu affiché, début, nature)`.
     pub(crate) nav_anim: HashMap<PaneId, (u64, Instant, fx_app::state::NavKind)>,
+    /// Onglet en cours de glisser (réordonnancement ou détachement).
+    pub(crate) tab_drag: Option<titlebar::TabDrag>,
+    /// Onglets glissés d'une fenêtre folder à une autre.
+    pub(crate) peer: peer::PeerState,
     /// Apparition des onglets : premier affichage de chaque onglet (par identifiant).
     pub(crate) tab_born: HashMap<u64, Instant>,
     /// Images dessinées (pas d'animation d'apparition à la toute première).
@@ -133,7 +139,7 @@ impl ViewState {
             scroll: HashMap::new(),
             rename: None,
             band: None,
-            drag_cooldown: false,
+            dnd: dnd::DndState::default(),
             shell_menu: None,
             palette_query: String::new(),
             palette_index: 0,
@@ -152,12 +158,36 @@ impl ViewState {
             dont_ask_delete: false,
             slow_click: None,
             nav_anim: HashMap::new(),
+            tab_drag: None,
+            peer: peer::PeerState::default(),
             tab_born: HashMap::new(),
             frames: 0,
             sidebar_active: None,
             sidebar_last: None,
             wheel_zoom: 0.0,
         }
+    }
+
+    /// Message d'une autre fenêtre folder : ceux qui concernent les onglets (survol, dépôt)
+    /// sont gardés par la vue, les autres rendus à l'appelant.
+    pub fn receive_peer(
+        &mut self,
+        msg: fx_store::remote::Remote,
+    ) -> Option<fx_store::remote::Remote> {
+        match msg {
+            m @ (fx_store::remote::Remote::TabHover { .. }
+            | fx_store::remote::Remote::TabHoverEnd
+            | fx_store::remote::Remote::TabDrop { .. }) => {
+                peer::receive(&mut self.peer, m);
+                None
+            }
+            other => Some(other),
+        }
+    }
+
+    /// Cette fenêtre a cédé son unique onglet à une autre : ne pas enregistrer sa session.
+    pub fn merged_away(&self) -> bool {
+        self.peer.merged_away
     }
 
     /// Fenêtre principale (pour les boîtes de dialogue natives).
@@ -241,6 +271,8 @@ pub fn draw(
         threads,
     };
     requests(&ctx, &mut f);
+    // Avant le clavier : Échap abandonne d'abord un glisser en cours.
+    dnd::begin(&ctx, &mut f);
     keyboard(&ctx, &mut f);
     slow_click(&ctx, &mut f);
     wheel_zoom(&ctx, &mut f);
@@ -276,7 +308,7 @@ pub fn draw(
     if state.show_diagnostics {
         diagnostics::draw(&ctx, &mut f);
     }
-    external_drops(&ctx, &mut f);
+    dnd::finish(&ctx, &mut f);
     if !maximized && !f.vs.fullscreen {
         resize_edges(&ctx);
     }
@@ -543,45 +575,6 @@ fn typeahead(f: &mut Fx<'_>, text: &str) {
             shift: false,
         });
         f.vs.scroll.entry(id).or_default().ensure = Some(pos);
-    }
-}
-
-/// Fichiers déposés depuis l'Explorateur (ou depuis fx lui-même après `SHDoDragDrop`).
-fn external_drops(ctx: &egui::Context, f: &mut Fx<'_>) {
-    let dropped: Vec<PathBuf> = ctx.input(|i| {
-        i.raw
-            .dropped_files
-            .iter()
-            .map(|d| d.path().to_path_buf())
-            .filter(|p| !p.as_os_str().is_empty())
-            .collect()
-    });
-    if dropped.is_empty() {
-        return;
-    }
-    let mods = ctx.input(|i| i.modifiers);
-    let copy = if mods.ctrl {
-        Some(true)
-    } else if mods.shift {
-        Some(false)
-    } else {
-        None
-    };
-    // Cible : dossier survolé (mémorisé par les vues) sinon dossier courant du volet actif.
-    let dest = ctx
-        .data(|d| d.get_temp::<PathBuf>(egui::Id::unique("fx-drop-target")))
-        .or_else(|| {
-            f.state
-                .pane()
-                .working_dir()
-                .map(std::path::Path::to_path_buf)
-        });
-    if let Some(dest) = dest {
-        f.send(Msg::DropPaths {
-            dest,
-            paths: dropped,
-            copy,
-        });
     }
 }
 

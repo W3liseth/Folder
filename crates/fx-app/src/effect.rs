@@ -116,6 +116,12 @@ pub enum Effect {
         dir: PathBuf,
     },
     Persist(Persist),
-    NewWindow(Option<PathBuf>),
+    /// Nouvelle fenêtre (processus `folder.exe`) ouverte sur `start` (cf.
+    /// [`crate::Location::window_arg`]) ; `rect` : placement imposé en pixels physiques
+    /// (gauche, haut, droite, bas), sinon celui de la dernière session.
+    NewWindow {
+        start: Option<PathBuf>,
+        rect: Option<[i32; 4]>,
+    },
     EmptyRecycleBin,
 }
