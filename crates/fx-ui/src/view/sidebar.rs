@@ -49,8 +49,10 @@ fn content(ui: &mut Ui, f: &mut Fx<'_>) {
     let pal = f.pal;
     ui.spacing_mut().item_spacing.y = 1.0;
     // Surlignage de l'élément actif : réservé sous les lignes, dessiné à la fin quand sa
-    // position est connue, et animé d'un élément à l'autre (il glisse).
+    // position est connue, et animé d'un élément à l'autre (il glisse). Haut du contenu
+    // (il défile) : le surlignage est placé et animé par rapport à lui.
     let highlight = ui.painter().add(egui::Shape::Noop);
+    let origin = ui.cursor().top();
     f.vs.sidebar_active = None;
     let current = f.state.pane().location().clone();
 
@@ -203,22 +205,28 @@ fn content(ui: &mut Ui, f: &mut Fx<'_>) {
             }
         }
     }
-    paint_highlight(ui, f, highlight);
+    paint_highlight(ui, f, highlight, origin);
 }
 
 /// Surlignage de l'élément actif, qui glisse vers sa nouvelle position (180 ms) et s'efface
 /// quand aucun élément de la barre ne correspond à l'emplacement affiché.
-fn paint_highlight(ui: &Ui, f: &mut Fx<'_>, slot: egui::layers::ShapeIdx) {
+///
+/// Positions relatives au haut du contenu (`origin`, qui suit le défilement) : en
+/// défilant, le surlignage reste collé à sa ligne au lieu de la rattraper en 180 ms, et
+/// une ligne sortie de la vue puis revenue le retrouve en place.
+fn paint_highlight(ui: &Ui, f: &mut Fx<'_>, slot: egui::layers::ShapeIdx, origin: f32) {
     let pal = f.pal;
     let ctx = ui.ctx().clone();
     let id = Id::unique("sidebar-highlight");
     let shown = f.vs.sidebar_active.is_some();
     let alpha = ctx.animate_bool_with_time(id.with("a"), shown, 0.15);
-    let Some(target) = f.vs.sidebar_active.or(f.vs.sidebar_last) else {
+    let active = f.vs.sidebar_active.map(|r| r.translate(vec2(0.0, -origin)));
+    let Some(target) = active.or(f.vs.sidebar_last) else {
         return;
     };
     f.vs.sidebar_last = Some(target);
-    let y = ctx.animate_value_with_time(id.with("y"), target.top(), 0.18);
+    let target = target.translate(vec2(0.0, origin));
+    let y = origin + ctx.animate_value_with_time(id.with("y"), target.top() - origin, 0.18);
     // Les lignes des lecteurs sont plus hautes (jauge) : la hauteur glisse aussi.
     let h = ctx.animate_value_with_time(id.with("h"), target.height(), 0.18);
     if alpha <= 0.0 {
@@ -391,15 +399,17 @@ fn row_with_gauge(
     };
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     let content_y = rect.top() + content_y;
+    // Même hors de la vue : le surlignage reste ainsi en place pendant le défilement.
+    if active {
+        f.vs.sidebar_active = Some(rect);
+    }
     if !ui.is_rect_visible(rect) {
         return r;
     }
     if let Some(d) = drop {
         super::dnd::zone(f, rect, super::dnd::Target::Dir(d.to_path_buf()));
     }
-    if active {
-        f.vs.sidebar_active = Some(rect);
-    } else {
+    if !active {
         widgets::hover_fill(ui, &r, rect, &pal, 4.0);
     }
     let icon_center = pos2(rect.left() + 18.0, content_y);

@@ -236,6 +236,9 @@ fn empty_area(ui: &mut Ui, f: &mut Fx<'_>, pane: PaneId) {
         egui::Id::unique(("empty", pane.0)),
         egui::Sense::click(),
     );
+    if r.secondary_clicked() {
+        super::shellmenu::secondary_click(ui, f);
+    }
     if r.clicked() || r.secondary_clicked() {
         f.send(Msg::FocusPane(pane));
     }

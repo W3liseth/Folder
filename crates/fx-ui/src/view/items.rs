@@ -74,6 +74,30 @@ pub fn texture(
         .map(|t| (t.id(), t.size_vec2()))
 }
 
+/// État de synchronisation (Google Drive, OneDrive, fichiers hors connexion…) dessiné sur
+/// l'icône `rect` de l'entrée, comme dans l'Explorateur : l'icône superposée que le
+/// fournisseur fait afficher, son badge dans un coin.
+pub fn sync_overlay(ui: &Ui, f: &mut Fx<'_>, l: &DirSnapshot, e: &EntryView<'_>, rect: Rect) {
+    // Appareils du réseau : pas de fichier à interroger.
+    if f.state.shell_item(l.generation(), e.id).is_some() {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    let px = (rect.width() * ctx.pixels_per_point()).round() as u16;
+    let path = || l.dir_of(e.id).join(fx_core::wtf8::display(e.name).as_ref());
+    if let Some(t) = f
+        .images
+        .overlay(&ctx, f.shell, (l.generation(), e.id), px.max(16), path)
+    {
+        ui.painter().image(
+            t.id(),
+            rect,
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
 /// Icône shell propre à `path` (icône de dossier définie par Windows, lecteur…), dessinée
 /// en `size` points autour de `center` ; glyphe `fallback` tant qu'elle n'est pas chargée.
 #[allow(clippy::too_many_arguments)]
@@ -205,6 +229,9 @@ pub fn interact(
     }
     if resp.middle_clicked() && is_dir {
         f.send(Msg::OpenInNewTab(fx_app::Location::Dir(path.clone())));
+    }
+    if resp.secondary_clicked() {
+        super::shellmenu::secondary_click(ui, f);
     }
     if resp.secondary_clicked() && !selected {
         f.send(Msg::FocusPane(pane));

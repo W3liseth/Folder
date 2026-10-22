@@ -1,9 +1,9 @@
 //! Dessin de la fenêtre. Ne fait que lire l'état et émettre des [`Msg`].
 //!
 //! Exceptions documentées (appels Win32 obligatoirement sur le thread UI) : style DWM de la
-//! fenêtre, menu contextuel shell (`TrackPopupMenuEx`) et glisser-déposer sortant
-//! (`SHDoDragDrop`), tous deux modaux ; position du curseur pendant un glisser OLE (cf.
-//! [`dnd`]).
+//! fenêtre, options du menu contextuel shell (`IContextMenu`, cf. [`shellmenu`]) et
+//! glisser-déposer sortant (`SHDoDragDrop`, modal) ; position du curseur pendant un glisser
+//! OLE (cf. [`dnd`]).
 
 mod columns;
 mod diagnostics;
@@ -23,6 +23,7 @@ mod peer;
 mod preview;
 mod search;
 pub(crate) mod settings;
+mod shellmenu;
 mod sidebar;
 mod status;
 mod titlebar;
@@ -30,7 +31,6 @@ mod toasts;
 mod toolbar;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use eframe::egui::{
@@ -76,12 +76,6 @@ pub(crate) struct SlowClick {
     pub at: Instant,
 }
 
-/// Menu shell à ouvrir en fin d'image (après fermeture du menu egui).
-pub(crate) enum ShellMenu {
-    Items(Vec<PathBuf>),
-    Background(PathBuf),
-}
-
 /// État purement visuel, hors `AppState`.
 pub struct ViewState {
     pub(crate) accent: Color32,
@@ -94,7 +88,8 @@ pub struct ViewState {
     pub(crate) band: Option<Band>,
     /// Glisser-déposer de fichiers en cours et cibles de dépôt.
     pub(crate) dnd: dnd::DndState,
-    pub(crate) shell_menu: Option<(ShellMenu, (i32, i32), bool)>,
+    /// Options supplémentaires (menu du shell dessiné par folder).
+    pub(crate) shell: shellmenu::ShellMenuState,
     pub(crate) palette_query: String,
     pub(crate) palette_index: usize,
     pub(crate) search_index: usize,
@@ -122,7 +117,8 @@ pub struct ViewState {
     pub(crate) tab_born: HashMap<u64, Instant>,
     /// Images dessinées (pas d'animation d'apparition à la toute première).
     pub(crate) frames: u64,
-    /// Barre latérale : ligne de l'élément actif à cette image, et la dernière connue.
+    /// Barre latérale : ligne de l'élément actif à cette image (à l'écran), et la dernière
+    /// connue (relative au haut du contenu, qui défile).
     pub(crate) sidebar_active: Option<egui::Rect>,
     pub(crate) sidebar_last: Option<egui::Rect>,
     /// Ctrl + molette accumulée (pavés tactiles : petits pas en points).
@@ -140,7 +136,7 @@ impl ViewState {
             rename: None,
             band: None,
             dnd: dnd::DndState::default(),
-            shell_menu: None,
+            shell: shellmenu::ShellMenuState::default(),
             palette_query: String::new(),
             palette_index: 0,
             search_index: 0,
@@ -271,6 +267,7 @@ pub fn draw(
         threads,
     };
     requests(&ctx, &mut f);
+    crate::keys::text_clipboard(&ctx);
     // Avant le clavier : Échap abandonne d'abord un glisser en cours.
     dnd::begin(&ctx, &mut f);
     keyboard(&ctx, &mut f);
@@ -312,7 +309,8 @@ pub fn draw(
     if !maximized && !f.vs.fullscreen {
         resize_edges(&ctx);
     }
-    run_shell_menu(&ctx, &mut f);
+    shellmenu::show(&ctx, &mut f);
+    shellmenu::finish(&ctx, &mut f);
     f.vs.frames += 1;
     f.msgs
 }
@@ -346,17 +344,20 @@ fn requests(ctx: &egui::Context, f: &mut Fx<'_>) {
     }
     if r.shell_menu {
         let sel = f.state.pane().selected_paths();
-        let at = fx_win::window::cursor_pos();
-        let menu = if sel.is_empty() {
+        let target = if sel.is_empty() {
             f.state
                 .pane()
                 .working_dir()
-                .map(|d| ShellMenu::Background(d.to_path_buf()))
+                .map(|d| shellmenu::Target::Background(d.to_path_buf()))
         } else {
-            Some(ShellMenu::Items(sel))
+            Some(shellmenu::Target::Items(sel))
         };
-        if let Some(m) = menu {
-            f.vs.shell_menu = Some((m, at, false));
+        if let Some(t) = target {
+            // Au clavier : sous le pointeur s'il est dans la fenêtre, sinon au centre.
+            let at = ctx
+                .pointer_latest_pos()
+                .unwrap_or_else(|| ctx.content_rect().center());
+            shellmenu::open_more(ctx, f, t, Some(at));
         }
     }
     if r.focus_path {
@@ -614,32 +615,6 @@ fn resize_edges(ctx: &egui::Context) {
 }
 
 /// Ouvre le menu shell demandé pendant l'image (modal, sur le thread UI).
-fn run_shell_menu(ctx: &egui::Context, f: &mut Fx<'_>) {
-    let Some((menu, at, extended)) = f.vs.shell_menu.take() else {
-        return;
-    };
-    let Some(hwnd) = f.vs.hwnd else { return };
-    let mods = ctx.input(|i| fx_win::ctxmenu::Modifiers {
-        shift: i.modifiers.shift,
-        ctrl: i.modifiers.ctrl,
-    });
-    let out = match &menu {
-        ShellMenu::Items(paths) => fx_win::ctxmenu::show(hwnd, paths, at, extended, mods),
-        ShellMenu::Background(dir) => {
-            fx_win::ctxmenu::show_background(hwnd, dir, at, extended, mods)
-        }
-    };
-    match out {
-        Ok(fx_win::ctxmenu::MenuOutcome::Rename) => f.send(Msg::BeginRename),
-        Ok(fx_win::ctxmenu::MenuOutcome::Invoked { verb }) => f.send(Msg::ShellInvoked { verb }),
-        Ok(fx_win::ctxmenu::MenuOutcome::Dismissed) => {}
-        Err(e) => f.send(Msg::Error(format!(
-            "Menu contextuel indisponible : {}",
-            e.message().trim()
-        ))),
-    }
-}
-
 /// Copie de travail des réglages pour une modification.
 pub(crate) fn settings_with(state: &AppState, change: impl FnOnce(&mut Settings)) -> Msg {
     let mut s = state.settings.clone();

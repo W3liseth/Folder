@@ -713,6 +713,20 @@ pub fn menu_entry(glyph: &str, text: &str, pal: &Palette) -> egui::text::LayoutJ
     menu_entry_colored(glyph, pal.text, text, pal)
 }
 
+/// Contenu d'un menu, qui défile s'il dépasse la hauteur de la fenêtre : un menu egui ne
+/// peut pas en sortir, contrairement aux menus natifs (options du shell, souvent longues).
+pub fn menu_scroll<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let max = (ui.ctx().content_rect().height() - 24.0).max(120.0);
+    // Toute la hauteur de la fenêtre, pas seulement l'espace sous le point d'ouverture :
+    // un menu qui déborde est ensuite remonté dans la fenêtre par egui.
+    ui.set_max_height(max);
+    egui::ScrollArea::vertical()
+        .max_height(max)
+        .auto_shrink([true, true])
+        .show(ui, add)
+        .inner
+}
+
 /// [`menu_entry`] avec une couleur d'icône choisie (coche, pastille d'étiquette…).
 pub fn menu_entry_colored(
     glyph: &str,

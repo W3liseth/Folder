@@ -72,10 +72,23 @@ pub fn hotkey(key: EKey, m: Modifiers) -> Option<HotKey> {
 /// navigation, Entrée, Suppr…). Les lettres sans modificateur sont laissées à la saisie
 /// rapide (« type-ahead ») et aux champs de texte.
 pub fn pressed(ctx: &egui::Context) -> Vec<HotKey> {
+    let ctrl = |c| {
+        Some(HotKey {
+            ctrl: true,
+            shift: false,
+            alt: false,
+            key: Key::Char(c),
+        })
+    };
     ctx.input(|i| {
         i.events
             .iter()
             .filter_map(|e| match e {
+                // Moteurs eframe (glow, wgpu) : egui-winit y change ces raccourcis en
+                // événements de presse-papiers (le moteur CPU les laisse en touches).
+                Event::Copy => ctrl('C'),
+                Event::Cut => ctrl('X'),
+                Event::Paste(_) | Event::PasteImage(_) => ctrl('V'),
                 // Rangée des chiffres : touche physique (AZERTY : « 3 » sans Maj donne « " »).
                 Event::Key {
                     key,
@@ -102,6 +115,50 @@ fn is_digit(k: EKey) -> bool {
         k,
         Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9
     )
+}
+
+/// Champ de texte actif (chemin, renommage, recherche…) : rend à egui les événements
+/// `Copy`/`Cut`/`Paste` que le moteur CPU ne produit plus (cf. `lib.rs`), à partir des
+/// touches de copier-coller habituelles. À appeler avant de dessiner les champs.
+pub fn text_clipboard(ctx: &egui::Context) {
+    if !ctx.egui_wants_keyboard_input() {
+        return;
+    }
+    let wanted: Vec<Event> = ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers: m,
+                    ..
+                } => match key {
+                    EKey::C if m.command && !m.alt => Some(Event::Copy),
+                    EKey::Insert if m.command && !m.shift => Some(Event::Copy),
+                    EKey::X if m.command && !m.alt => Some(Event::Cut),
+                    EKey::Delete if m.shift && !m.command => Some(Event::Cut),
+                    EKey::V if m.command && !m.alt => Some(Event::Paste(String::new())),
+                    EKey::Insert if m.shift && !m.command => Some(Event::Paste(String::new())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    });
+    let events: Vec<Event> = wanted
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Paste(_) => fx_win::clipboard::get_text()
+                .map(|t| t.replace("\r\n", "\n"))
+                .filter(|t| !t.is_empty())
+                .map(Event::Paste),
+            other => Some(other),
+        })
+        .collect();
+    if !events.is_empty() {
+        ctx.input_mut(|i| i.events.extend(events));
+    }
 }
 
 /// Le raccourci doit-il être ignoré pendant la saisie dans un champ de texte ?

@@ -1,5 +1,6 @@
-//! Menus contextuels de fx (le menu shell complet est accessible par
-//! « Afficher plus d'options », comme sous Windows 11).
+//! Menus contextuels de folder. Les options du shell (extensions comprises) s'ouvrent par
+//! « Afficher plus d'options », comme sous Windows 11, ou suivent directement le menu avec
+//! Maj + clic droit ; folder les dessine lui-même (cf. `shellmenu`).
 
 use std::path::PathBuf;
 
@@ -7,13 +8,18 @@ use eframe::egui::{self, Ui};
 use fx_app::Msg;
 use fx_commands::CommandId;
 
+use super::Fx;
+use super::shellmenu::{self, Target};
 use super::toolbar::{menu_cmd, sort_menu, view_menu};
-use super::{Fx, ShellMenu};
 use crate::theme::glyph;
 use crate::widgets::menu_entry;
 
 pub fn item_menu(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf], is_dir: bool) {
     crate::widgets::menu_appear(ui);
+    crate::widgets::menu_scroll(ui, |ui| item_entries(ui, f, paths, is_dir));
+}
+
+fn item_entries(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf], is_dir: bool) {
     ui.set_min_width(260.0);
     if matches!(f.state.pane().location(), fx_app::Location::RecycleBin) {
         menu_cmd(ui, f, CommandId::Restore, "");
@@ -99,6 +105,16 @@ pub fn item_menu(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf], is_dir: bool) {
         menu_cmd(ui, f, CommandId::RunAsAdmin, "");
     }
     menu_cmd(ui, f, CommandId::Properties, "");
+    more_options(ui, f, Target::Items(paths.to_vec()));
+}
+
+/// Fin des menus : « Afficher plus d'options », ou, après Maj + clic droit, ces options
+/// elles-mêmes à la suite.
+fn more_options(ui: &mut Ui, f: &mut Fx<'_>, target: Target) {
+    if f.vs.shell.shift {
+        shellmenu::inline(ui, f, target);
+        return;
+    }
     ui.separator();
     if ui
         .add(
@@ -111,9 +127,7 @@ pub fn item_menu(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf], is_dir: bool) {
         )
         .clicked()
     {
-        let at = fx_win::window::cursor_pos();
-        let extended = ui.input(|i| i.modifiers.shift);
-        f.vs.shell_menu = Some((ShellMenu::Items(paths.to_vec()), at, extended));
+        shellmenu::open_more(ui.ctx(), f, target, None);
         ui.close();
     }
 }
@@ -165,6 +179,10 @@ pub(crate) fn tag_list(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf]) {
 /// Menu du fond d'un dossier.
 pub fn background_menu(ui: &mut Ui, f: &mut Fx<'_>) {
     crate::widgets::menu_appear(ui);
+    crate::widgets::menu_scroll(ui, |ui| background_entries(ui, f));
+}
+
+fn background_entries(ui: &mut Ui, f: &mut Fx<'_>) {
     ui.set_min_width(260.0);
     if matches!(f.state.pane().location(), fx_app::Location::RecycleBin) {
         menu_cmd(ui, f, CommandId::EmptyRecycleBin, "");
@@ -209,23 +227,7 @@ pub fn background_menu(ui: &mut Ui, f: &mut Fx<'_>) {
     menu_cmd(ui, f, CommandId::OpenTerminal, "");
     menu_cmd(ui, f, CommandId::PinToSidebar, "Épingler ce dossier");
     menu_cmd(ui, f, CommandId::Properties, "");
-    ui.separator();
-    if ui
-        .button(menu_entry(
-            CommandId::ShowMoreOptions.glyph(),
-            "Afficher plus d'options",
-            &f.pal,
-        ))
-        .clicked()
-    {
-        if let Some(dir) = f.state.pane().working_dir() {
-            let at = fx_win::window::cursor_pos();
-            f.vs.shell_menu = Some((
-                ShellMenu::Background(dir.to_path_buf()),
-                at,
-                ui.input(|i| i.modifiers.shift),
-            ));
-        }
-        ui.close();
+    if let Some(dir) = f.state.pane().working_dir() {
+        more_options(ui, f, Target::Background(dir.to_path_buf()));
     }
 }

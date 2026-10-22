@@ -454,6 +454,11 @@ fn run_cpu(viewport: ViewportBuilder, opts: Options) -> Result<(), Error> {
     // Animations cadencées sur la fréquence de l'écran (pas de synchronisation verticale en
     // rendu CPU) ; le banc de défilement mesure au contraire le débit sans plafond.
     egui_software_backend::set_frame_pacing(opts.bench != BenchMode::Scroll);
+    // Ctrl+C/X/V comme touches ordinaires : copier, couper, coller des fichiers (sinon
+    // egui-winit les change en événements de texte, et Ctrl+V disparaît quand le
+    // presse-papiers ne contient que des fichiers). Les champs de texte les retrouvent par
+    // `keys::text_clipboard`.
+    egui_software_backend::set_clipboard_shortcuts(false);
     let mut init_error = None;
     let result =
         egui_software_backend::run_app_with_software_backend(config, |ctx| {

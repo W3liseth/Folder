@@ -48,6 +48,11 @@
 - Fermeture (portage fx) : `App::on_exit` est appelé une seule fois, aussi quand la fenêtre se
   ferme par `ViewportCommand::Close` (l'original ne l'appelait que pour la fermeture native ;
   la session de folder n'était donc pas sauvegardée par le bouton de sa barre de titre).
+- Raccourcis du presse-papiers (portage fx) : `set_clipboard_shortcuts(false)` laisse
+  Ctrl+C/X/V (et Ctrl+Inser, Maj+Inser, Maj+Suppr) arriver comme des touches ordinaires au
+  lieu des événements `Copy`/`Cut`/`Paste` d'egui-winit. Sans cela, folder ne voyait jamais
+  ces touches, et Ctrl+V ne produisait rien du tout quand le presse-papiers ne contenait que
+  des fichiers (pas de texte).
 - Fenêtre créée cachée (portage fx) : Windows n'envoie pas de WM_PAINT à une fenêtre
   invisible ; la première image est donc produite dès la création de la surface, ce qui
   permet à folder de placer la fenêtre (écran, taille, état agrandi) puis de l'afficher

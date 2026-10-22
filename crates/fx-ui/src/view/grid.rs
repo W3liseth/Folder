@@ -138,6 +138,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                             Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                             tint,
                         );
+                        items::sync_overlay(ui, f, listing, &e, icon_box);
                     }
                     None => {
                         let (g, col) = if e.meta.is_dir() {

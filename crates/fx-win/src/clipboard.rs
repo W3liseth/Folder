@@ -94,6 +94,30 @@ pub fn set_text(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Texte (Unicode) du presse-papiers, s'il y en a.
+pub fn get_text() -> Option<String> {
+    use windows::Win32::System::Memory::GlobalSize;
+    const CF_UNICODETEXT: u32 = 13;
+    // SAFETY: pas de précondition.
+    unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) }.ok()?;
+    let _open = Open::acquire().ok()?;
+    // SAFETY: presse-papiers ouvert ; le handle reste au système.
+    let h = unsafe { GetClipboardData(CF_UNICODETEXT) }.ok()?;
+    let mem = HGLOBAL(h.0);
+    // SAFETY: bloc global de `GlobalSize` octets, lu jusqu'au premier NUL puis déverrouillé.
+    unsafe {
+        let p = GlobalLock(mem).cast::<u16>();
+        if p.is_null() {
+            return None;
+        }
+        let units = std::slice::from_raw_parts(p, GlobalSize(mem) / 2);
+        let len = units.iter().position(|&c| c == 0).unwrap_or(units.len());
+        let text = String::from_utf16_lossy(&units[..len]);
+        let _ = GlobalUnlock(mem);
+        Some(text)
+    }
+}
+
 /// Fichiers du presse-papiers et indicateur « couper ».
 pub fn get_files() -> Option<(Vec<PathBuf>, bool)> {
     if !has_files() {

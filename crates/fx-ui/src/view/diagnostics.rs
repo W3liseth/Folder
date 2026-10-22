@@ -73,10 +73,11 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                 kv(
                     "Images en cache",
                     format!(
-                        "{} ({} Ko icônes, {} Ko miniatures)",
+                        "{} ({} Ko icônes, {} Ko miniatures) ; {} états de synchronisation",
                         f.images.len(),
                         icons / 1024,
-                        thumbs / 1024
+                        thumbs / 1024,
+                        f.images.overlays()
                     ),
                 );
                 kv(

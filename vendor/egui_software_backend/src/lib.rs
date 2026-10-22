@@ -110,7 +110,7 @@ pub use damage::{DamageRect, DamageReport};
 #[cfg(feature = "winit")]
 pub use winit::{
     App, SoftwareBackend, SoftwareBackendAppConfiguration, run_app_with_software_backend,
-    set_clear_each_frame, set_frame_pacing, set_partial_redraw,
+    set_clear_each_frame, set_clipboard_shortcuts, set_frame_pacing, set_partial_redraw,
 };
 
 #[inline(always)]

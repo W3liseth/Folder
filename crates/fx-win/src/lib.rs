@@ -13,6 +13,7 @@ pub mod fileop;
 pub mod image;
 pub mod ipc;
 pub mod launch;
+pub mod overlay;
 pub mod path;
 pub mod process;
 pub mod security;

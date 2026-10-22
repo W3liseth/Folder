@@ -59,7 +59,7 @@ pub fn shell_image(path: &Path, size: u32, kind: ImageKind) -> Result<Rgba> {
     read_bitmap(bitmap.0)
 }
 
-struct OwnedBitmap(HBITMAP);
+pub(crate) struct OwnedBitmap(pub(crate) HBITMAP);
 
 impl Drop for OwnedBitmap {
     fn drop(&mut self) {
@@ -68,7 +68,7 @@ impl Drop for OwnedBitmap {
     }
 }
 
-fn read_bitmap(hbm: HBITMAP) -> Result<Rgba> {
+pub(crate) fn read_bitmap(hbm: HBITMAP) -> Result<Rgba> {
     let mut bm = BITMAP::default();
     // SAFETY: `bm` est une BITMAP de la taille annoncée.
     let n = unsafe {

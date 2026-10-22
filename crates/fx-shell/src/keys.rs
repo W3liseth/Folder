@@ -14,6 +14,9 @@ pub enum ImageKey {
     Path { path: PathBuf, size: u16 },
     /// Miniature d'un fichier.
     Thumb { path: PathBuf, size: u16 },
+    /// Icône superposée d'état de synchronisation (index dans la liste d'images système,
+    /// cf. `fx_win::overlay`), partagée par tous les fichiers qui la portent.
+    Overlay { index: i32, size: u16 },
 }
 
 impl ImageKey {
@@ -29,7 +32,8 @@ impl ImageKey {
             Self::Ext { size, .. }
             | Self::Folder { size }
             | Self::Path { size, .. }
-            | Self::Thumb { size, .. } => *size,
+            | Self::Thumb { size, .. }
+            | Self::Overlay { size, .. } => *size,
         }
     }
 }

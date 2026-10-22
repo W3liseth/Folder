@@ -393,6 +393,7 @@ fn row(
                     Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                     fade(Color32::WHITE),
                 );
+                items::sync_overlay(ui, f, l, e, icon_rect);
             }
             None => {
                 let (g, c) = if e.meta.is_dir() {
@@ -517,6 +518,9 @@ fn row(
 
 /// Fond de liste : clic (désélection), menu du fond.
 pub(crate) fn background(ui: &Ui, f: &mut Fx<'_>, pane: PaneId, bg: &Response) {
+    if bg.secondary_clicked() {
+        super::shellmenu::secondary_click(ui, f);
+    }
     if bg.clicked() || bg.secondary_clicked() {
         f.send(Msg::FocusPane(pane));
         if !ui.input(|i| i.modifiers.command) {

@@ -231,13 +231,17 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                 "softbuffer::Surface::new",
             ))?;
 
-        let egui_winit = egui_winit::State::new(
+        let mut egui_winit = egui_winit::State::new(
             self.egui_context.clone(),
             egui::ViewportId::ROOT,
             &self.window,
             Some(self.window.scale_factor() as f32),
             None,
             None,
+        );
+        // Portage fx : cf. `set_clipboard_shortcuts`.
+        egui_winit.set_clipboard_shortcuts(
+            CLIPBOARD_SHORTCUTS.load(core::sync::atomic::Ordering::Relaxed),
         );
 
         let egui_app = (self.egui_app_factory)(self.egui_context.clone());
@@ -1339,6 +1343,18 @@ static PARTIAL_REDRAW: core::sync::atomic::AtomicBool = core::sync::atomic::Atom
 /// image est rasterisée et présentée entièrement, comme dans la crate d'origine.
 pub fn set_partial_redraw(partial: bool) {
     PARTIAL_REDRAW.store(partial, core::sync::atomic::Ordering::Relaxed);
+}
+
+static CLIPBOARD_SHORTCUTS: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(true);
+
+/// Portage fx : traduire (défaut) ou non Ctrl+C/X/V, Ctrl+Inser, Maj+Inser et Maj+Suppr en
+/// événements `Copy`/`Cut`/`Paste` (cf. `egui_winit::State::set_clipboard_shortcuts`).
+/// Désactivé, ces touches arrivent comme des `Event::Key` ordinaires : l'application les lie
+/// à ses propres commandes (copier des fichiers…) et rend elle-même ces événements aux champs
+/// de texte. À appeler avant `run_app_with_software_backend`.
+pub fn set_clipboard_shortcuts(enabled: bool) {
+    CLIPBOARD_SHORTCUTS.store(enabled, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Starts the app.

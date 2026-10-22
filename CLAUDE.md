@@ -23,8 +23,10 @@ Si un changement contredit ce document, mets à jour le document dans le même c
 - Pas de `tokio`, `async-std` ni `rayon` (threads et mémoire supplémentaires). Concurrence =
   `std::thread` + `crossbeam-channel` + les pools définis dans `fx-app`.
 - Pas d'I/O, d'appel COM ou d'appel système bloquant sur le thread UI. Exceptions
-  documentées (ARCHITECTURE.md §11.2), qui l'exigent : menu contextuel shell
-  (`TrackPopupMenuEx`), glisser vers l'extérieur (`SHDoDragDrop`) et attributs DWM du cadre.
+  documentées (ARCHITECTURE.md §11.2), qui l'exigent : options du menu contextuel shell
+  (`IContextMenu` : construction, lecture, exécution ; les extensions comptent sur la boucle
+  de messages de la fenêtre), glisser vers l'extérieur (`SHDoDragDrop`) et attributs DWM du
+  cadre.
 - Pas d'objet alloué par fichier listé : utiliser `DirSnapshot` (structure de tableaux).
 - Pas de `unsafe` hors de `crates/fx-win` (seule exception : le code tiers vendu dans
   `vendor/`, qu'on ne modifie que pour le porter ; cf. `vendor/*/VENDOR.md`).

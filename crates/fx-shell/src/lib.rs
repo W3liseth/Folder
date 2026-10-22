@@ -2,7 +2,9 @@
 //! - tâches urgentes (ouvrir, propriétés…) traitées en premier, dans l'ordre ;
 //! - images (icônes, miniatures) traitées en **LIFO** : lors d'un défilement, les éléments
 //!   visibles en dernier sont servis d'abord ; la file est bornée (les plus anciennes
-//!   demandes sont abandonnées).
+//!   demandes sont abandonnées) ;
+//! - tâches de fond (état de synchronisation des fichiers visibles) : après les images, en
+//!   LIFO, file bornée elle aussi.
 
 mod keys;
 
@@ -15,6 +17,8 @@ pub use keys::{ImageKey, THUMBNAIL_EXTS, image_request};
 
 /// Nombre maximal de demandes d'images en attente.
 const MAX_PENDING_IMAGES: usize = 512;
+/// Nombre maximal de tâches de fond en attente.
+const MAX_PENDING_LOW: usize = 256;
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -35,6 +39,7 @@ struct Queues {
     urgent: VecDeque<Job>,
     images: Vec<ImageRequest>,
     queued: HashSet<ImageKey>,
+    low: Vec<Job>,
 }
 
 struct Shared {
@@ -55,6 +60,7 @@ impl ShellWorker {
                 urgent: VecDeque::new(),
                 images: Vec::new(),
                 queued: HashSet::new(),
+                low: Vec::new(),
             }),
             cv: Condvar::new(),
         });
@@ -70,6 +76,18 @@ impl ShellWorker {
     pub fn spawn(&self, job: impl FnOnce() + Send + 'static) {
         if let Ok(mut q) = self.shared.q.lock() {
             q.urgent.push_back(Box::new(job));
+            self.shared.cv.notify_one();
+        }
+    }
+
+    /// Tâche de fond, après les images : la dernière demandée passe d'abord ; au-delà de
+    /// la borne, les plus anciennes sont abandonnées.
+    pub fn spawn_low(&self, job: impl FnOnce() + Send + 'static) {
+        if let Ok(mut q) = self.shared.q.lock() {
+            q.low.push(Box::new(job));
+            if q.low.len() > MAX_PENDING_LOW {
+                drop(q.low.remove(0));
+            }
             self.shared.cv.notify_one();
         }
     }
@@ -95,11 +113,12 @@ impl ShellWorker {
         self.shared.cv.notify_one();
     }
 
-    /// Abandonne les images en attente (changement de dossier).
+    /// Abandonne les images et les tâches de fond en attente (changement de dossier).
     pub fn clear_images(&self) {
         if let Ok(mut q) = self.shared.q.lock() {
             q.images.clear();
             q.queued.clear();
+            q.low.clear();
         }
     }
 }
@@ -118,6 +137,9 @@ fn run(shared: &Shared, sink: &ImageSink) {
                     q.queued.remove(&req.key);
                     break Task::Image(req);
                 }
+                if let Some(job) = q.low.pop() {
+                    break Task::Job(job);
+                }
                 q = match shared.cv.wait(q) {
                     Ok(q) => q,
                     Err(_) => return,
@@ -131,7 +153,12 @@ fn run(shared: &Shared, sink: &ImageSink) {
                 }
             }
             Task::Image(req) => {
-                let img = fx_win::image::shell_image(&req.path, req.size, req.kind).ok();
+                let img = match req.key {
+                    ImageKey::Overlay { index, .. } => {
+                        fx_win::overlay::overlay_image(index, req.size).ok()
+                    }
+                    _ => fx_win::image::shell_image(&req.path, req.size, req.kind).ok(),
+                };
                 sink(req.key, img);
             }
         }

@@ -524,6 +524,7 @@ dans les chemins chauds.
   « Plus d'options » qui construit le vrai menu shell via `IContextMenu` /
   `IContextMenu2/3` (`QueryContextMenu` → `TrackPopupMenuEx` → `InvokeCommand`),
   avec `HandleMenuMsg` pour les sous-menus dynamiques (Envoyer vers, Ouvrir avec…).
+  (Réalisé autrement : le menu shell est lu puis dessiné par folder, cf. §11.1 « Shell ».)
 - **Glisser-déposer** : OLE `IDropTarget` sur la fenêtre (`RegisterDragDrop`) et
   `DoDragDrop` + `IDataObject` shell (`SHCreateDataObject`) en sortie ; compatible avec
   l'Explorateur et les autres applications.
@@ -738,7 +739,7 @@ télémétrie distante.
 | Rendu partiel : une zone modifiée non détectée laisserait une trace de l'image précédente | Rendu partiel comparé pixel à pixel au rendu complet (`renderbench --verify`, test `partial_render_matches_full_render`) ; replis en rendu complet (redimensionnement, restauration, thème, changement d'échelle) ; `FOLDER_CPU_FULL_REDRAW=1` pour l'écarter en cas de doute. |
 | Rendu CPU trop lent sur grands écrans / machines modestes | Tâche d'optimisation 4K (§9, phase 1) ; mesure systématique 1080p/1440p/4K ; repli GPU possible par machine. |
 | egui ne tient pas un budget (ex. texte massif en grille) | Mesurer tôt (phase 1) ; cache de galleys ; si besoin, rendu custom de la liste via `egui::Painter` ; plan B Slint, isolé par `fx-ui`. |
-| Extensions shell tierces lentes ou qui plantent (menus contextuels, aperçus) | Appels shell dans des threads STA dédiés avec délai d'expiration ; aperçus hébergés hors du thread UI ; jamais d'appel shell bloquant sur le thread UI sauf `TrackPopupMenuEx`. |
+| Extensions shell tierces lentes ou qui plantent (menus contextuels, aperçus) | Appels shell dans des threads STA dédiés avec délai d'expiration ; aperçus hébergés hors du thread UI ; jamais d'appel shell bloquant sur le thread UI sauf les options du menu contextuel (`IContextMenu`). |
 | Dossiers réseau lents | Énumération toujours asynchrone + indicateur de chargement + annulation ; pas de surveillance sur les partages lents (option). |
 | Chemins longs / noms exotiques | Préfixe `\\?\` systématique dans `fx-win` ; noms WTF-8 ; jeux de tests dédiés. |
 | Fuite mémoire de textures | Caches LRU bornés en octets, compteurs dans l'overlay, test `memprobe` en navigation répétée (1 000 navigations → dérive < 2 Mo). |
@@ -806,7 +807,9 @@ télémétrie distante.
   sens, l'historique désignant déjà la destination), apparition des onglets et glissement
   des autres, menus contextuels et déroulants (zoom et fondu), surlignage de la barre
   latérale qui glisse d'un élément à l'autre (position et hauteur : les lignes des lecteurs
-  grandissent avec leur jauge, libellé et jauge centrés), sélection en fondu.
+  grandissent avec leur jauge, libellé et jauge centrés ; position retenue par rapport au
+  contenu qui défile, si bien qu'il reste collé à sa ligne pendant le défilement et la
+  retrouve en place quand elle revient dans la vue), sélection en fondu.
 - **Style** (couleurs unies, inspiré de Files avec une touche futuriste) : petites capitales
   espacées pour les sections et les en-têtes de colonnes, liseré « néon » sous l'onglet actif
   et en haut des cartes, halo d'accent partant de la pastille de sélection (liste, barre
@@ -847,8 +850,27 @@ télémétrie distante.
   Windows ; egui n'en ferait que 40 px).
 - **Étiquettes** : icône d'étiquette colorée (barre latérale, accueil, menu contextuel),
   activables dans les paramètres, ajout, suppression, couleurs proposées ou libres.
-- **Shell** : menu contextuel folder + « Afficher plus d'options » (vrai menu `IContextMenu`,
-  sous-menus dynamiques), icônes et miniatures via `IShellItemImageFactory`.
+- **Shell** : menu contextuel folder + « Afficher plus d'options », icônes et miniatures via
+  `IShellItemImageFactory`. Les options du shell ne sont pas affichées par Windows : le menu
+  `IContextMenu` est construit (`QueryContextMenu`, entrées étendues avec Maj) puis lu
+  (`GetMenuItemInfoW` : libellés sans `&`, raccourcis, icônes 32 bits, états grisé, coché, par
+  défaut, verbes canoniques, sous-menus ; ceux que les extensions ne remplissent qu'à
+  l'ouverture, comme Ouvrir avec et Envoyer vers, reçoivent d'abord `WM_INITMENUPOPUP` par
+  `HandleMenuMsg`), dessiné par folder (`fx-ui::view::shellmenu`, défilant s'il dépasse la
+  fenêtre), et l'entrée choisie exécutée par `InvokeCommand` (« Renommer » : renommage sur
+  place ; « Ouvrir » un dossier : navigation dans folder). « Afficher plus d'options » ouvre
+  ces entrées dans un menu folder à la place du premier ; Maj + clic droit les ajoute à la
+  suite du menu folder, sans celles qu'il propose déjà (par verbe : ouvrir, couper, copier,
+  coller, supprimer, renommer, propriétés, copier le chemin, épingler).
+- **État de synchronisation cloud** (`fx_win::overlay`) : sur l'icône des fichiers (Détails,
+  Liste, Grille, Colonnes), l'icône superposée que le fournisseur fait dessiner par
+  l'Explorateur (Google Drive, OneDrive, Dropbox…), obtenue par `IShellIconOverlay` sur le
+  dossier parent et la liste d'images système ; celles du shell (raccourci, partage) sont
+  écartées. Interrogée seulement sous une racine cloud (racines `SyncRootManager`, dossiers
+  OneDrive, volume « Google Drive ») : ailleurs, aucune extension n'est chargée (celle de
+  Google Drive ajoute 4 threads au processus, dès qu'on parcourt son lecteur). Interrogation
+  sur le thread shell, après les images ; état retenu par entrée affichée (borné à 4 096,
+  compté dans F12), revérifié toutes les 3 s tant que l'entrée visible en porte un.
 - **Glisser-déposer** (`fx-ui::view::dnd`) : dans la fenêtre, glisser géré par folder vers
   un dossier de la liste, le fond d'un volet, le fil d'Ariane, un onglet, la barre latérale
   ou la Corbeille (cible surlignée, aperçu « Déplacer vers… / Copier vers… » sous le
@@ -915,7 +937,9 @@ télémétrie distante.
   ne gère qu'une fenêtre) ; `fx-ui` dépend donc aussi de `fx-fs` (calcul de taille) pour
   cette mini-application, qui ne passe pas par `fx-app`.
 - **Thread UI** (§6, CLAUDE.md) : trois appels Win32 restent sur le thread UI parce qu'ils
-  l'exigent — menu contextuel shell (`TrackPopupMenuEx`), glisser vers l'extérieur
+  l'exigent — options du menu contextuel shell (`IContextMenu` construit, lu et exécuté sur
+  ce thread : les extensions comptent sur la boucle de messages de la fenêtre propriétaire ;
+  environ 1 s au premier menu, qui charge les extensions, 0,1 s ensuite), glisser vers l'extérieur
   (`SHDoDragDrop`, boucle modale OLE) et attributs DWM du cadre. `fx-ui` dépend donc de
   `fx-win` pour ces trois appels, et pour la position du curseur pendant un glisser OLE
   (`GetCursorPos`, non bloquant) ainsi que pour les onglets glissés d'une fenêtre à l'autre
@@ -925,6 +949,8 @@ télémétrie distante.
   en LIFO, actions shell), watcher IOCP, threads du moteur et du système. Les opérations
   fichiers, la recherche et les boîtes modales natives utilisent un thread temporaire qui
   se termine avec elles ; la persistance passe par le pool I/O (pas de thread dédié).
+  Les extensions shell tierces chargées à la demande (menu contextuel, état de
+  synchronisation sur un lecteur cloud) peuvent créer leurs propres threads.
 - **Conflits** (§7.3) : boîtes natives d'`IFileOperation` (pas encore notre dialogue).
 - **Étiquettes** (§7.8) : clé = chemin (pas encore `FileId` + numéro de volume) ; un
   renommage hors de folder perd l'étiquette.
@@ -940,6 +966,10 @@ télémétrie distante.
   Sans ces deux corrections, une animation de survol de 80 ms produisait des centaines
   d'images et un délai (`request_repaint_after`) faisait tourner la boucle à vide : sur un
   même scénario (3 s d'inactivité, deux clics, renommage), 1 355 images avant, 51 après.
+  `set_clipboard_shortcuts(false)` (fenêtre principale) : Ctrl+C/X/V arrivent comme des
+  touches et commandent copier, couper, coller des fichiers ; egui-winit les changeait en
+  événements de texte, et Ctrl+V ne produisait rien avec seulement des fichiers dans le
+  presse-papiers. Les champs de texte retrouvent ces événements (`keys::text_clipboard`).
 - **Icônes de dossiers** : barre latérale, page d'accueil, fil d'Ariane et onglets affichent
   l'icône que Windows définit pour le dossier (`ImageKey::Path`) ; dans les vues, les
   dossiers marqués lecture seule ou système (dossiers personnalisés, `desktop.ini`) aussi.
@@ -972,7 +1002,7 @@ télémétrie distante.
 | Défilement 3840×2160, p95 (hors écran, `renderbench`) | 3,8–6,9 ms | ≤ 8 ms ✓ |
 | Exécutable | 11,4 Mo | ≤ 15 Mo ✓ |
 
-Tests : `cargo test --workspace` (120 tests, dont la comparaison rendu partiel / rendu
+Tests : `cargo test --workspace` (122 tests, dont la comparaison rendu partiel / rendu
 complet) ; `clippy -D warnings` propre, y compris avec la feature `wgpu`.
 
 ### 11.4 Reste à faire

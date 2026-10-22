@@ -69,6 +69,9 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                         if bg.clicked() {
                             f.send(fx_app::Msg::FocusPane(pane.id));
                         }
+                        if bg.secondary_clicked() {
+                            super::shellmenu::secondary_click(ui, f);
+                        }
                         bg.context_menu(|ui| super::menus::background_menu(ui, f));
                         let first = (viewport.top() / ROW).floor().max(0.0) as usize;
                         let last = ((viewport.bottom() / ROW).ceil() as usize).min(rows);
@@ -110,6 +113,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                                         Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                                         Color32::WHITE,
                                     );
+                                    items::sync_overlay(ui, f, l, &e, icon_rect);
                                 }
                                 None => {
                                     let (g, col) = if e.meta.is_dir() {
