@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Configuration d'artefact SignPath « binaries » (à recopier dans le projet SignPath
+     « folder »). L'artefact est le ZIP envoyé par le workflow Installeur : folder.exe et le
+     désinstalleur d'Inno Setup (renommé uninstaller.exe le temps de la signature). Nom et
+     version du produit imposés (app/folder/build.rs, installer/folder.iss). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="folder.exe" product-name="folder" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="uninstaller.exe" product-name="folder" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

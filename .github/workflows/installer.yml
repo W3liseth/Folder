@@ -5,6 +5,13 @@ name: Installeur
 # release `v<version>` n'existe pas encore, l'installeur est construit puis joint à une
 # nouvelle release (tag créé sur le commit). Si elle existe déjà, un push ne fait rien et un
 # lancement à la demande construit seulement l'installeur (artefact du run).
+#
+# Signature (SignPath Foundation, cf. README « Politique de signature de code ») : active dès
+# que la variable de dépôt SIGNPATH_ORGANIZATION_ID est définie (avec le secret
+# SIGNPATH_API_TOKEN). folder.exe et le désinstalleur sont signés (une demande) avant
+# d'entrer dans l'installeur, puis l'installeur lui-même (une seconde demande) ; chaque
+# demande attend l'approbation manuelle dans SignPath (1 h au plus). Sans cette variable,
+# l'installeur est construit sans signature, comme avant.
 on:
   push:
     branches: [main]
@@ -13,6 +20,8 @@ on:
 
 permissions:
   contents: write
+  # SignPath lit les détails du run et télécharge les artefacts à signer.
+  actions: read
 
 # Deux runs simultanés pourraient tous deux juger la release absente.
 concurrency:
@@ -57,6 +66,7 @@ jobs:
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,11 +79,103 @@ jobs:
       - name: Inno Setup
         run: choco install innosetup --no-progress -y
 
+      # Désinstalleur signé (méthode d'Inno Setup sans SignTool, cf. SignedUninstaller) : une
+      # première compilation dépose dans target/uninstaller un exemplaire du désinstalleur à
+      # signer, sous un nom unique, puis s'arrête ; signé à part, il est repris par la
+      # compilation suivante, qui en intègre la signature.
+      - name: Désinstalleur à signer
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/uninstaller, target/to-sign | Out-Null
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" /DSignUninstaller installer\folder.iss
+          $u = @(Get-ChildItem target/uninstaller -File)
+          if ($u.Count -ne 1) { throw "désinstalleur à signer introuvable dans target/uninstaller ($($u.Count) fichier(s))" }
+          "UNINSTALLER=$($u[0].Name)" >> $env:GITHUB_ENV
+          Copy-Item target/release/folder.exe target/to-sign/folder.exe
+          Copy-Item $u[0].FullName target/to-sign/uninstaller.exe
+          # Cette compilation peut s'arrêter en réclamant la signature : attendu.
+          $global:LASTEXITCODE = 0
+
+      - name: Binaires à signer
+        if: env.SIGN == 'true'
+        id: unsigned-binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: folder-binaries-unsigned
+          path: target/to-sign/
+          if-no-files-found: error
+
+      # Configuration d'artefact « binaries » : .signpath/artifact-configuration/binaries.xml.
+      - name: Signature de folder.exe et du désinstalleur (SignPath)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'folder' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: binaries
+          github-artifact-id: ${{ steps.unsigned-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/signed-binaries
+          parameters: |
+            version: ${{ toJSON(env.VERSION) }}
+
+      - name: Binaires signés en place
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          foreach ($f in 'folder.exe', 'uninstaller.exe') {
+            $sig = Get-AuthenticodeSignature "target/signed-binaries/$f"
+            if ($sig.Status -ne 'Valid') { throw "$f : signature $($sig.Status)" }
+          }
+          Copy-Item target/signed-binaries/folder.exe target/release/folder.exe -Force
+          Copy-Item target/signed-binaries/uninstaller.exe "target/uninstaller/$env:UNINSTALLER" -Force
+
       - name: Installeur
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" installer\folder.iss
+          $defines = @("/DAppVersion=$env:VERSION")
+          if ($env:SIGN -eq 'true') { $defines += '/DSignUninstaller' }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" @defines installer\folder.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Installeur à signer
+        if: env.SIGN == 'true'
+        id: unsigned-setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: folder-setup-unsigned
+          path: target/installer/folder-setup-${{ env.VERSION }}-x64.exe
+          if-no-files-found: error
+
+      # Configuration d'artefact « installer » : .signpath/artifact-configuration/installer.xml.
+      - name: Signature de l'installeur (SignPath)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'folder' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/signed-setup
+          parameters: |
+            version: ${{ toJSON(env.VERSION) }}
+
+      - name: Installeur signé
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $setup = "folder-setup-$env:VERSION-x64.exe"
+          $sig = Get-AuthenticodeSignature "target/signed-setup/$setup"
+          if ($sig.Status -ne 'Valid') { throw "$setup : signature $($sig.Status)" }
+          Copy-Item "target/signed-setup/$setup" "target/installer/$setup" -Force
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,15 +1,17 @@
+// Modèle : build.rs remplace @VERSION@ (0.3.0), @VERSION_COMMA@ (0,3,0,0) et @DIR@ (ce
+// dossier) puis compile la copie complétée.
 #include <winres.h>
 
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "folder.exe.manifest"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@DIR@/folder.exe.manifest"
 
-// Icône de l'application (sources : icon/folder.svg, icon/folder-small.svg ; cf. icon/make_ico.py).
+// Icône de l'application (source : icon/icone.png ; cf. icon/make_ico.ps1).
 // Ressource 1 : la première icône de l'exécutable, affichée par l'Explorateur et les raccourcis.
-1 ICON "folder.ico"
+1 ICON "@DIR@/folder.ico"
 
-// Nom affiché par Windows (Gestionnaire des tâches, propriétés du fichier).
+// Nom et version affichés par Windows (Gestionnaire des tâches, propriétés du fichier).
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION @VERSION_COMMA@
+PRODUCTVERSION @VERSION_COMMA@
 FILEOS 0x40004
 FILETYPE 0x1
 {
@@ -21,8 +23,8 @@ FILETYPE 0x1
       VALUE "ProductName", "folder"
       VALUE "OriginalFilename", "folder.exe"
       VALUE "InternalName", "folder"
-      VALUE "FileVersion", "0.1.0"
-      VALUE "ProductVersion", "0.1.0"
+      VALUE "FileVersion", "@VERSION@"
+      VALUE "ProductVersion", "@VERSION@"
     }
   }
   BLOCK "VarFileInfo"

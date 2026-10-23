@@ -1,7 +1,7 @@
 ; Installeur Windows de folder (Inno Setup 6).
 ;
 ; Construction locale (après `cargo build --release -p folder`) :
-;   iscc /DAppVersion=0.3.0 installer\folder.iss
+;   iscc /DAppVersion=0.4.0 installer\folder.iss
 ; Sortie : target\installer\folder-setup-<version>-x64.exe
 ; En CI : .github/workflows/installer.yml.
 ;
@@ -10,10 +10,12 @@
 ; l'utilisateur (%APPDATA%\folder, %LOCALAPPDATA%\folder) sont conservés à la désinstallation.
 
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.4.0"
 #endif
 #define AppName "folder"
 #define AppExe "folder.exe"
+; Partie numérique de la version (0.4.0-beta.1 → 0.4.0) : seule acceptée par VersionInfoVersion.
+#define NumVersion Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1)
 
 [Setup]
 ; Identifiant stable : ne jamais le changer (mises à jour et désinstallation en dépendent).
@@ -22,8 +24,18 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppName}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumVersion}
 VersionInfoDescription=Installeur de {#AppName}
+; Nom et version du produit contrôlés à la signature (.signpath/artifact-configuration).
+VersionInfoProductName={#AppName}
+VersionInfoProductTextVersion={#AppVersion}
+#ifdef SignUninstaller
+; Désinstalleur signé sans SignTool (signature distante, SignPath) : la première
+; compilation dépose ici l'exemplaire à signer, la suivante en intègre la signature
+; (cf. .github/workflows/installer.yml).
+SignedUninstaller=yes
+SignedUninstallerDir=..\target\uninstaller
+#endif
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -33,6 +45,10 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 SetupIconFile=..\app\folder\folder.ico
+; Icône de folder en haut de l'assistant, à 100 % et 200 % (générées par
+; app\folder\icon\make_ico.ps1), avec leur transparence.
+WizardSmallImageFile=wizard-small-55.bmp,wizard-small-110.bmp
+WizardImageAlphaFormat=defined
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern

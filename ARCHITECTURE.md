@@ -839,12 +839,15 @@ télémétrie distante.
   n'est pas modifié), la trie comme folder, y sélectionne le fichier, invoque son verbe par
   défaut, puis vit tant que la fenêtre ouverte existe (~24 Mo, 23 threads, hors du processus
   principal). La fenêtre principale ne guette qu'un échec rapide (repli `ShellExecute`).
-- **Icône** : tuile sombre aux coins arrondis et au bord lumineux multicolore (bleu, rouge,
-  vert, jaune) ; dossier en perspective fait de feuilles colorées (vert, rouge-orangé avec
-  onglet, jaune) et d'une façade en verre bleu (cyan → bleu → violet) avec reflet diagonal,
-  épaisseur visible et bord lumineux ; sources `app/folder/icon/*.svg`, rendues par `preview.html` et assemblées en
-  `folder.ico` (10 tailles, variante calée sur la grille en 16 px) par `make_ico.py` ;
-  ressource 1 de l'exécutable, posée sur chaque fenêtre (`WM_SETICON`).
+- **Icône** : dossier en perspective (feuilles verte, rouge-orangé et jaune, façade bleue
+  vitrée) ; source `app/folder/icon/icone.png` (1254 px), transformée par `make_ico.ps1`
+  (System.Drawing, sans dépendance) : pixels parasites du détourage retirés (seule la plus
+  grande zone opaque est gardée, avec 3 px d'anticrénelage), recadrage carré, réduction en
+  alpha prémultiplié vers `folder.ico` (10 tailles, de 256 à 16 px), `folder-256.png`
+  (README) et la petite image de l'assistant d'installation (`installer/wizard-small-*.bmp`) ;
+  ressource 1 de l'exécutable, posée sur chaque fenêtre (`WM_SETICON`). Version de
+  l'exécutable (propriétés du fichier) : celle de `Cargo.toml`, insérée par `build.rs` dans
+  une copie de `folder.rc`.
 - **Souris** : boutons 4 et 5 pour précédent et suivant ; molette à N lignes de liste
   (30 px) par cran, réglable de 1 à 10 dans Paramètres > Général (3 par défaut, comme
   Windows ; egui n'en ferait que 40 px).
@@ -897,8 +900,18 @@ télémétrie distante.
   Construit par `.github/workflows/installer.yml` : la version de `[workspace.package]`
   (Cargo.toml) fait foi ; un push sur `main` qui la change (ou un lancement à la demande)
   crée la release `v<version>` avec l'installeur si elle n'existe pas encore (préversion si
-  la version a un suffixe). Pas encore de signature de code : SmartScreen avertit au premier
-  lancement.
+  la version a un suffixe). Signature de code par SignPath Foundation (gratuite pour les
+  projets open source : dépôt public, licences MIT / Apache-2.0, politique de signature dans
+  le README) : `folder.exe` et le désinstalleur sont signés avant d'entrer dans
+  l'installeur, puis l'installeur ; deux demandes de signature par release, approuvées à la
+  main dans SignPath, chacune avec la version contrôlée (nom et version du produit,
+  `.signpath/artifact-configuration/`). Désinstalleur : méthode d'Inno Setup sans SignTool
+  (`SignedUninstaller` + `SignedUninstallerDir`, définis par `/DSignUninstaller`) — une
+  première compilation dépose l'exemplaire à signer, la seconde en intègre la signature.
+  Étapes actives dès que la variable de dépôt `SIGNPATH_ORGANIZATION_ID` existe (secret
+  `SIGNPATH_API_TOKEN`), et seulement si SignPath Foundation accepte le projet (dépôt
+  public) ; sans elles, installeur non signé (avertissement SmartScreen, et blocage par
+  Smart App Control).
 
 - **Commandes** (§7.6) : `fx-commands` ne contient que les métadonnées (macro `commands!`
   dans `lib.rs` : identifiant, catégorie, libellé, glyphe, raccourcis) ; l'exécution vit

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Configuration d'artefact SignPath « installer » (à recopier dans le projet SignPath
+     « folder »). L'artefact est le ZIP envoyé par le workflow Installeur, qui contient
+     l'installeur Inno Setup ; nom et version du produit imposés (installer/folder.iss). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="folder-setup-${version}-x64.exe" product-name="folder" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

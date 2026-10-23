@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/folder/icon/folder.svg" width="128" alt="Icône de folder">
+  <img src="app/folder/icon/folder-256.png" width="128" alt="Icône de folder">
 </p>
 
 <h1 align="center">folder</h1>
@@ -62,8 +62,10 @@ Télécharge `folder-setup-<version>-x64.exe` depuis la page
 - Windows 10 (1809) ou plus récent, en x64.
 - L'installation se fait pour l'utilisateur courant, sans droits administrateur.
   L'assistant propose aussi une installation pour tous les utilisateurs.
-- L'exécutable n'est pas encore signé : au premier lancement, Windows SmartScreen affiche un
-  avertissement (« Informations complémentaires », puis « Exécuter quand même »).
+- L'installeur et `folder.exe` sont signés par SignPath Foundation (voir la
+  [politique de signature de code](#politique-de-signature-de-code-code-signing-policy)).
+  Une release encore sans signature déclenche un avertissement de Windows SmartScreen
+  (« Informations complémentaires », puis « Exécuter quand même »).
 - La désinstallation conserve les réglages (`%APPDATA%\folder`, `%LOCALAPPDATA%\folder`).
 
 ## Compiler
@@ -103,12 +105,12 @@ sont décrits dans [CLAUDE.md](CLAUDE.md).
 
 La version de folder est celle de `[workspace.package]` dans [Cargo.toml](Cargo.toml).
 
-1. Change la version, par exemple `version = "0.4.0"`.
+1. Change la version, par exemple `version = "0.5.0"`.
 2. Pousse le commit sur `main`.
 
 Le workflow [Installeur](.github/workflows/installer.yml) construit alors l'installeur et
-crée la release `v0.4.0`, avec le tag sur ce commit et les notes générées à partir des
-changements. Une version avec suffixe, comme `0.4.0-beta.1`, est publiée en préversion.
+crée la release `v0.5.0`, avec le tag sur ce commit et les notes générées à partir des
+changements. Une version avec suffixe, comme `0.5.0-beta.1`, est publiée en préversion.
 Si la release existe déjà, rien n'est publié. Lancé à la main depuis l'onglet Actions, le
 workflow crée la release qui manque, ou construit seulement l'installeur.
 
@@ -116,7 +118,7 @@ Pour construire l'installeur en local, installe [Inno Setup 6](https://jrsoftwar
 puis lance :
 
 ```bash
-iscc /DAppVersion=0.3.0 installer/folder.iss
+iscc /DAppVersion=0.4.0 installer/folder.iss
 ```
 
 L'installeur est écrit dans `target\installer`.
@@ -141,6 +143,27 @@ L'interface utilise [egui](https://github.com/emilk/egui) avec un moteur de rend
 OpenGL est disponible avec `--renderer glow`. Les choix, les budgets et l'état de
 l'implémentation sont détaillés dans [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Politique de signature de code (Code signing policy)
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Seuls les binaires de ce projet, compilés depuis ce dépôt par le workflow
+  [Installeur](.github/workflows/installer.yml) sur les machines de GitHub, sont signés :
+  `folder.exe`, le désinstalleur et l'installeur `folder-setup-<version>-x64.exe`.
+- Chaque signature est approuvée à la main pour chaque release.
+- Auteurs et relecteurs (committers and reviewers) : [W3liseth](https://github.com/W3liseth).
+- Approbateurs (approvers) : [W3liseth](https://github.com/W3liseth).
+
+### Confidentialité (privacy policy)
+
+This program will not transfer any information to other networked systems unless
+specifically requested by the user or the person installing or operating it.
+
+folder n'envoie aucune donnée sur le réseau : ni télémétrie, ni vérification de mise à jour.
+Il n'accède au réseau que lorsque tu ouvres toi-même un emplacement réseau (partages,
+ordinateurs du réseau local) ou un fichier qui s'y trouve.
+
 ## Licence
 
-MIT ou Apache-2.0, au choix (voir `license` dans [Cargo.toml](Cargo.toml)).
+MIT ou Apache-2.0, au choix : [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE).
