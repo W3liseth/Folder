@@ -566,9 +566,7 @@ fn system_shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
         ui,
         f,
         "Windows + E ouvre folder",
-        "À la place de l'Explorateur : chaque appui ouvre une nouvelle fenêtre de folder, \
-         grâce à un petit processus lancé avec Windows (quelques Mo, sans fenêtre). \
-         Désactivé, Windows + E ouvre de nouveau l'Explorateur.",
+        "Override le raccourci Windows + E pour ouvrir folder au lieu de l'Explorateur Windows.",
         |ui| toggle(ui, &mut s.win_e_opens_folder),
     );
     // Capture de la combinaison : Windows n'accepte qu'une lettre, un chiffre ou F1–F12 avec
