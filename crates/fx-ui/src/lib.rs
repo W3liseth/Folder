@@ -112,7 +112,11 @@ pub fn run_win_e() -> bool {
     let dir = exe.parent().map(std::path::Path::to_path_buf);
     fx_win::win_e::run(|| {
         let mut cmd = std::process::Command::new(&exe);
-        cmd.arg("folder:home");
+        // Aucune fenêtre ouverte : lancement comme depuis l'icône (onglets de la dernière
+        // session restaurés) ; sinon une nouvelle fenêtre sur l'accueil, comme l'Explorateur.
+        if fx_win::window::exists_for_exe(WINDOW_TITLE, &exe) {
+            cmd.arg("folder:home");
+        }
         // Pas le dossier courant du processus résident : il ne doit verrouiller aucun dossier.
         if let Some(d) = &dir {
             cmd.current_dir(d);

@@ -855,8 +855,10 @@ télémétrie distante.
   fenêtre ni egui (~2 Mo privés, 4 threads, hors du budget de la fenêtre principale), pose
   un crochet clavier bas niveau (`WH_KEYBOARD_LL`) qui avale Windows + E (sans Ctrl, Alt ni
   Maj), envoie une touche neutre (VK 0xE8) pour que le relâchement de Windows n'ouvre pas le
-  menu Démarrer, et lance `folder.exe folder:home` hors du crochet (message posté à son
-  thread) : une fenêtre par appui, autorisée à passer au premier plan. Une seule instance
+  menu Démarrer, et lance folder hors du crochet (message posté à son thread) : une fenêtre
+  par appui, autorisée à passer au premier plan. Aucune fenêtre folder ouverte (titre et
+  exécutable du processus, `fx_win::window::exists_for_exe`) : lancement sans argument,
+  comme depuis l'icône, donc session restaurée ; sinon `folder.exe folder:home`. Une seule instance
   par session (mutex `Local\folder-win-e`) ; l'événement `Local\folder-win-e-quit` l'arrête.
   Désactivé : valeur `Run` retirée, processus arrêté, Windows + E rouvre aussitôt
   l'Explorateur. Au démarrage, folder relance le processus s'il manque (option active). La

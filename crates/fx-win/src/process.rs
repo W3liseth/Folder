@@ -85,6 +85,29 @@ pub fn thread_count(pid: u32) -> Result<u32> {
     Ok(0)
 }
 
+/// Chemin complet de l'exécutable d'un processus (droit de requête limité : marche aussi
+/// pour les processus élevés).
+pub fn image_path(pid: u32) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Win32::System::Threading::{PROCESS_NAME_WIN32, QueryFullProcessImageNameW};
+    // SAFETY: pas de précondition ; le handle est fermé par `OwnedHandle`.
+    let h =
+        OwnedHandle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?);
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: handle ouvert ci-dessus, tampon local et sa taille en caractères.
+    unsafe {
+        QueryFullProcessImageNameW(
+            h.0,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    }
+    .ok()?;
+    Some(std::ffi::OsString::from_wide(&buf[..len as usize]).into())
+}
+
 struct OwnedHandle(HANDLE);
 
 impl Drop for OwnedHandle {

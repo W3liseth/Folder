@@ -403,6 +403,47 @@ pub fn set_cloaked(hwnd: isize, cloaked: bool) {
     };
 }
 
+/// Une fenêtre de premier niveau titrée `title` appartient-elle à un processus lancé depuis
+/// `exe` ? (Le titre seul ne suffit pas : l'Explorateur titre ses fenêtres du nom du dossier.)
+pub fn exists_for_exe(title: &str, exe: &std::path::Path) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+    let mut find = ExeFind {
+        title: title.encode_utf16().collect(),
+        exe: exe.as_os_str().to_ascii_lowercase(),
+        found: false,
+    };
+    // SAFETY: le rappel ne vit que pendant l'appel et n'accède à `find` que via LPARAM.
+    unsafe {
+        let _ = EnumWindows(Some(exe_window), LPARAM((&raw mut find) as isize));
+    }
+    find.found
+}
+
+struct ExeFind {
+    title: Vec<u16>,
+    exe: std::ffi::OsString,
+    found: bool,
+}
+
+unsafe extern "system" fn exe_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    // SAFETY: LPARAM pointe vers la `ExeFind` de `exists_for_exe`, vivante pendant l'énumération.
+    let find = unsafe { &mut *(lparam.0 as *mut ExeFind) };
+    if text_of(hwnd, false) != find.title {
+        return true.into();
+    }
+    let mut pid = 0u32;
+    // SAFETY: HWND fourni par le système, sortie locale.
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    let same = crate::process::image_path(pid)
+        .is_some_and(|p| p.as_os_str().to_ascii_lowercase() == find.exe);
+    if same {
+        find.found = true;
+        return false.into();
+    }
+    true.into()
+}
+
 /// Titre (ou nom de classe si `class`) d'une fenêtre, tronqué à 128 caractères.
 fn text_of(hwnd: HWND, class: bool) -> Vec<u16> {
     use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
