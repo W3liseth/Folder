@@ -26,6 +26,9 @@ pub fn startup(
         Effect::LoadWsl,
         Effect::CheckClipboard,
     ];
+    if state.settings.win_e_opens_folder {
+        fx.push(Effect::EnsureWinE);
+    }
     let restore =
         session.filter(|s| state.settings.restore_session && !s.tabs.is_empty() && start.is_none());
     match restore {

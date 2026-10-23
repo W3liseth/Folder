@@ -381,6 +381,41 @@ impl Scheduler {
                     }
                 }
             }
+            Effect::SystemShortcuts { win_e, open_hotkey } => {
+                self.shell.spawn(move || {
+                    let Ok(exe) = std::env::current_exe() else {
+                        return;
+                    };
+                    // Windows + E ouvre déjà folder : la touche d'ouverture est inutile.
+                    let hotkey = if win_e {
+                        None
+                    } else {
+                        open_hotkey.as_ref().and_then(crate::system::launch_hotkey)
+                    };
+                    let done = fx_win::shortcuts::set_win_e(win_e.then_some(exe.as_path()))
+                        .and_then(|()| fx_win::shortcuts::set_launch_hotkey(&exe, hotkey));
+                    if let Err(e) = done {
+                        out.send(Msg::Error(format!(
+                            "Raccourcis système : {}",
+                            e.message().trim()
+                        )));
+                    }
+                });
+            }
+            Effect::EnsureWinE => self.io(move || {
+                if fx_win::win_e::is_running() {
+                    return;
+                }
+                let Ok(exe) = std::env::current_exe() else {
+                    return;
+                };
+                if let Err(e) = fx_win::shortcuts::set_win_e(Some(&exe)) {
+                    out.send(Msg::Error(format!(
+                        "Raccourcis système : {}",
+                        e.message().trim()
+                    )));
+                }
+            }),
             Effect::EmptyRecycleBin => {
                 let owner = self.owner.load(Ordering::Relaxed);
                 self.shell.spawn(move || {

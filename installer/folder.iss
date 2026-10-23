@@ -1,7 +1,7 @@
 ; Installeur Windows de folder (Inno Setup 6).
 ;
 ; Construction locale (après `cargo build --release -p folder`) :
-;   iscc /DAppVersion=0.4.0 installer\folder.iss
+;   iscc /DAppVersion=0.5.0 installer\folder.iss
 ; Sortie : target\installer\folder-setup-<version>-x64.exe
 ; En CI : .github/workflows/installer.yml.
 ;
@@ -10,7 +10,7 @@
 ; l'utilisateur (%APPDATA%\folder, %LOCALAPPDATA%\folder) sont conservés à la désinstallation.
 
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.5.0"
 #endif
 #define AppName "folder"
 #define AppExe "folder.exe"
@@ -75,4 +75,27 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
+; Processus résident de Windows + E relancé après une mise à jour (il se termine aussitôt si
+; l'option est désactivée). Pour l'utilisateur, même depuis une installation élevée.
+Filename: "{app}\{#AppExe}"; Parameters: "--win-e"; Flags: nowait runasoriginaluser
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Windows + E rendu à l'Explorateur et raccourci clavier d'ouverture retiré (réglages
+; « Raccourcis » de folder), avant la suppression de l'exécutable.
+Filename: "{app}\{#AppExe}"; Parameters: "--restore-explorer"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreExplorer"
+
+[Code]
+// Mise à jour : le processus résident de Windows + E (sans fenêtre, que le gestionnaire de
+// redémarrage ne sait pas fermer) est arrêté avant le remplacement de l'exécutable ; la
+// section [Run] le relance.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Exe: String;
+  Code: Integer;
+begin
+  Exe := ExpandConstant('{app}\{#AppExe}');
+  if FileExists(Exe) then
+    ExecAsOriginalUser(Exe, '--stop-win-e', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := '';
+end;

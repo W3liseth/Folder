@@ -34,6 +34,27 @@ fn main() -> ExitCode {
         };
     }
 
+    // Processus résident de Windows + E (option des réglages « Raccourcis »).
+    if raw_os.first().is_some_and(|a| a == fx_ui::WIN_E_ARG) {
+        return if fx_ui::run_win_e() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
+
+    // Mise à jour (installeur) : processus résident arrêté, option inchangée ; relancé ensuite.
+    if raw_os.first().is_some_and(|a| a == "--stop-win-e") {
+        fx_ui::stop_win_e();
+        return ExitCode::SUCCESS;
+    }
+
+    // Désinstallation : Windows + E rendu à l'Explorateur, raccourci d'ouverture retiré.
+    if raw_os.first().is_some_and(|a| a == "--restore-explorer") {
+        fx_ui::restore_explorer();
+        return ExitCode::SUCCESS;
+    }
+
     // Fenêtre Propriétés (lancée par la fenêtre principale) : processus à part, le temps de
     // la fenêtre.
     let raw: Vec<String> = std::env::args().skip(1).collect();

@@ -485,6 +485,7 @@ fn tags(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
 }
 
 fn shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    system_shortcuts(ui, f, s);
     let pal = f.pal;
     // Capture de la prochaine combinaison pour la commande en cours d'édition.
     if let Some(cmd) = f.vs.capture_hotkey {
@@ -555,6 +556,76 @@ fn shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
             });
         });
     }
+}
+
+/// Raccourcis qui agissent hors de folder, même fermé (cf. `fx_win::shortcuts`).
+fn system_shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    widgets::section(ui, &pal, "Système");
+    setting(
+        ui,
+        f,
+        "Windows + E ouvre folder",
+        "À la place de l'Explorateur : chaque appui ouvre une nouvelle fenêtre de folder, \
+         grâce à un petit processus lancé avec Windows (quelques Mo, sans fenêtre). \
+         Désactivé, Windows + E ouvre de nouveau l'Explorateur.",
+        |ui| toggle(ui, &mut s.win_e_opens_folder),
+    );
+    // Capture de la combinaison : Windows n'accepte qu'une lettre, un chiffre ou F1–F12 avec
+    // au moins deux modificateurs.
+    if f.vs.capture_open_hotkey {
+        let pressed = crate::keys::pressed(ui.ctx());
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            f.vs.capture_open_hotkey = false;
+            f.vs.open_hotkey_error = None;
+        } else if let Some(hk) = pressed.into_iter().next() {
+            if fx_app::system::launch_hotkey(&hk).is_some() {
+                s.open_hotkey = Some(hk);
+                f.vs.capture_open_hotkey = false;
+                f.vs.open_hotkey_error = None;
+            } else {
+                f.vs.open_hotkey_error = Some(format!(
+                    "{hk} n'est pas accepté par Windows : utilisez au moins deux touches parmi \
+                     Ctrl, Alt et Maj, avec une lettre, un chiffre ou F1 à F12."
+                ));
+            }
+        }
+    }
+    let active = !s.win_e_opens_folder;
+    let capturing = f.vs.capture_open_hotkey;
+    let desc = if active {
+        "Ouvre folder de n'importe où, même fermé (par exemple Ctrl + Alt + F)."
+    } else {
+        "Inactif : Windows + E ouvre déjà folder."
+    };
+    let mut start_capture = false;
+    setting(ui, f, "Raccourci pour ouvrir folder", desc, |ui| {
+        ui.add_enabled_ui(active, |ui| {
+            let text = if capturing {
+                "Appuyez sur la combinaison…".to_owned()
+            } else {
+                s.open_hotkey
+                    .map_or_else(|| "Aucun".to_owned(), |h| h.to_string())
+            };
+            let b = egui::Button::new(RichText::new(text).monospace().size(12.0))
+                .min_size(vec2(160.0, 26.0));
+            if ui.add(b).clicked() {
+                start_capture = true;
+            }
+            if s.open_hotkey.is_some() && !capturing && ui.small_button("Effacer").clicked() {
+                s.open_hotkey = None;
+            }
+        });
+    });
+    if start_capture {
+        f.vs.capture_open_hotkey = true;
+        f.vs.open_hotkey_error = None;
+    }
+    if let Some(err) = &f.vs.open_hotkey_error {
+        ui.label(RichText::new(err).size(12.0).color(pal.danger));
+        ui.add_space(4.0);
+    }
+    ui.add_space(8.0);
 }
 
 fn group_label(g: Group) -> &'static str {

@@ -11,6 +11,7 @@ pub mod msg;
 pub mod ops;
 pub mod scheduler;
 pub mod state;
+pub mod system;
 pub mod update;
 
 pub use effect::Effect;

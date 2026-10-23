@@ -124,4 +124,13 @@ pub enum Effect {
         rect: Option<[i32; 4]>,
     },
     EmptyRecycleBin,
+    /// Raccourcis système (cf. `fx_win::shortcuts`) : Windows + E ouvre folder (`win_e`),
+    /// sinon la touche `open_hotkey` (si elle est valide) ouvre folder.
+    SystemShortcuts {
+        win_e: bool,
+        open_hotkey: Option<fx_commands::HotKey>,
+    },
+    /// Au démarrage, Windows + E pris par folder : relance le processus résident s'il ne
+    /// tourne plus (arrêté, ou exécutable remplacé par une mise à jour).
+    EnsureWinE,
 }

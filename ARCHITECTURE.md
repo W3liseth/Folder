@@ -848,6 +848,27 @@ télémétrie distante.
   ressource 1 de l'exécutable, posée sur chaque fenêtre (`WM_SETICON`). Version de
   l'exécutable (propriétés du fichier) : celle de `Cargo.toml`, insérée par `build.rs` dans
   une copie de `folder.rc`.
+- **Raccourcis système** (Paramètres › Raccourcis › Système, `fx_win::shortcuts`), actifs
+  même folder fermé, appliqués sur le thread shell quand le réglage change :
+  « Windows + E ouvre folder » inscrit le processus résident `folder.exe --win-e`
+  (`fx_win::win_e`) dans la clé `Run` de l'utilisateur et le lance. Ce processus, sans
+  fenêtre ni egui (~2 Mo privés, 4 threads, hors du budget de la fenêtre principale), pose
+  un crochet clavier bas niveau (`WH_KEYBOARD_LL`) qui avale Windows + E (sans Ctrl, Alt ni
+  Maj), envoie une touche neutre (VK 0xE8) pour que le relâchement de Windows n'ouvre pas le
+  menu Démarrer, et lance `folder.exe folder:home` hors du crochet (message posté à son
+  thread) : une fenêtre par appui, autorisée à passer au premier plan. Une seule instance
+  par session (mutex `Local\folder-win-e`) ; l'événement `Local\folder-win-e-quit` l'arrête.
+  Désactivé : valeur `Run` retirée, processus arrêté, Windows + E rouvre aussitôt
+  l'Explorateur. Au démarrage, folder relance le processus s'il manque (option active). La
+  méthode du registre (copie de la commande `opennewwindow` de la classe
+  `{52205fd8-5dfb-447d-801a-d0b52f2e83e1}`) est ignorée par l'Explorateur de Windows 11 26H2.
+  Limite : une fenêtre élevée au premier plan ne transmet pas ses touches au crochet (UIPI).
+  L'installeur arrête le processus avant une mise à jour (`--stop-win-e`) et le relance
+  ensuite (il se termine aussitôt si l'option est désactivée). Sinon, une touche d'ouverture (au moins deux modificateurs parmi
+  Ctrl, Alt et Maj, avec une lettre, un chiffre ou F1–F12, contrainte de l'Explorateur) est
+  posée sur le raccourci « folder » du menu Démarrer de l'utilisateur, créé et marqué au
+  besoin, supprimé quand la touche est retirée. Le désinstalleur lance
+  `folder.exe --restore-explorer`, qui défait les deux.
 - **Souris** : boutons 4 et 5 pour précédent et suivant ; molette à N lignes de liste
   (30 px) par cran, réglable de 1 à 10 dans Paramètres > Général (3 par défaut, comme
   Windows ; egui n'en ferait que 40 px).

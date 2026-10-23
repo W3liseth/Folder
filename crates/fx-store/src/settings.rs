@@ -68,6 +68,10 @@ pub struct Settings {
     pub pinned_initialized: bool,
     /// Raccourcis personnalisés (remplacent les défauts de la commande).
     pub keybindings: HashMap<CommandId, Vec<HotKey>>,
+    /// Windows + E ouvre folder (une nouvelle fenêtre par appui) au lieu de l'Explorateur.
+    pub win_e_opens_folder: bool,
+    /// Raccourci système qui ouvre folder, même fermé (inactif si Windows + E l'ouvre déjà).
+    pub open_hotkey: Option<HotKey>,
     /// Largeur de la colonne Nom ; 0 : automatique (occupe la place restante).
     pub col_name: f32,
     pub col_modified: f32,
@@ -99,6 +103,8 @@ impl Default for Settings {
             pinned: Vec::new(),
             pinned_initialized: false,
             keybindings: HashMap::new(),
+            win_e_opens_folder: false,
+            open_hotkey: None,
             col_name: 0.0,
             col_modified: 150.0,
             col_type: 150.0,

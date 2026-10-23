@@ -2,7 +2,7 @@
   <img src="app/folder/icon/folder-256.png" width="128" alt="Icône de folder">
 </p>
 
-<h1 align="center">folder</h1>
+<h1 align="center">Folder</h1>
 
 <p align="center">
   Gestionnaire de fichiers pour Windows, écrit en Rust : <b>rapide</b>, <b>fluide</b> et <b>sobre</b>.
@@ -10,8 +10,7 @@
 
 ---
 
-folder reprend les fonctions d'un gestionnaire de fichiers moderne comme
-[Files](https://files.community/) : onglets, double volet, aperçus, étiquettes, palette de
+folder reprend les fonctions d'un gestionnaire de fichiers moderne : onglets, double volet, aperçus, étiquettes, palette de
 commandes. Il s'intègre à l'Explorateur Windows et tient dans un seul exécutable natif, sans
 WebView ni runtime .NET.
 
@@ -118,7 +117,7 @@ Pour construire l'installeur en local, installe [Inno Setup 6](https://jrsoftwar
 puis lance :
 
 ```bash
-iscc /DAppVersion=0.4.0 installer/folder.iss
+iscc /DAppVersion=0.5.0 installer/folder.iss
 ```
 
 L'installeur est écrit dans `target\installer`.

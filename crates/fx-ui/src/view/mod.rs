@@ -95,6 +95,9 @@ pub struct ViewState {
     pub(crate) search_index: usize,
     pub(crate) settings_section: usize,
     pub(crate) capture_hotkey: Option<CommandId>,
+    /// Paramètres : capture du raccourci système qui ouvre folder, et refus éventuel.
+    pub(crate) capture_open_hotkey: bool,
+    pub(crate) open_hotkey_error: Option<String>,
     pub(crate) bulk: dialogs::BulkState,
     pub(crate) typeahead: (String, Option<Instant>),
     pub(crate) fullscreen: bool,
@@ -142,6 +145,8 @@ impl ViewState {
             search_index: 0,
             settings_section: 0,
             capture_hotkey: None,
+            capture_open_hotkey: false,
+            open_hotkey_error: None,
             bulk: dialogs::BulkState::default(),
             typeahead: (String::new(), None),
             fullscreen: false,

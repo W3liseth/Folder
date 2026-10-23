@@ -87,6 +87,49 @@ pub type Error = Box<dyn std::error::Error>;
 pub mod props_window;
 pub mod settings_window;
 
+/// `folder.exe --restore-explorer` (désinstallation) : Windows + E rendu à l'Explorateur et
+/// raccourci clavier d'ouverture retiré (cf. `fx_win::shortcuts`).
+pub fn restore_explorer() {
+    let _com = fx_win::com::init_sta();
+    if let Ok(exe) = std::env::current_exe() {
+        fx_win::shortcuts::restore(&exe);
+    }
+}
+
+pub use fx_win::shortcuts::WIN_E_ARG;
+
+/// Processus résident `folder.exe --win-e` (cf. `fx_win::win_e`) : chaque Windows + E ouvre
+/// une nouvelle fenêtre folder sur l'accueil, jusqu'à ce que l'option soit désactivée. Sans
+/// fenêtre ni egui : quelques Mo. Se termine aussitôt si l'option est désactivée (lancement
+/// systématique après l'installation) ou s'il tourne déjà.
+pub fn run_win_e() -> bool {
+    if !fx_win::shortcuts::win_e_enabled() {
+        return true;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let dir = exe.parent().map(std::path::Path::to_path_buf);
+    fx_win::win_e::run(|| {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("folder:home");
+        // Pas le dossier courant du processus résident : il ne doit verrouiller aucun dossier.
+        if let Some(d) = &dir {
+            cmd.current_dir(d);
+        }
+        if let Ok(child) = cmd.spawn() {
+            fx_win::win_e::allow_foreground(child.id());
+        }
+    })
+    .is_ok()
+}
+
+/// `folder.exe --stop-win-e` (mise à jour) : arrête le processus résident sans toucher à
+/// l'option, pour que l'installeur puisse remplacer l'exécutable.
+pub fn stop_win_e() {
+    fx_win::win_e::stop();
+}
+
 /// Processus auxiliaire `folder.exe --open-media name|modified|type|size asc|desc -- FICHIER` :
 /// ouvre une image ou une vidéo depuis une vue du shell triée comme folder, pour que
 /// l'application (Photos) la parcoure dans cet ordre, et la sert jusqu'à la fermeture de sa

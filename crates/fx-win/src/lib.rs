@@ -19,12 +19,14 @@ pub mod process;
 pub mod security;
 pub mod shell;
 pub mod shellfolder;
+pub mod shortcuts;
 pub mod sort;
 pub mod sys;
 pub mod theme;
 pub mod time;
 mod util;
 pub mod watch;
+pub mod win_e;
 pub mod window;
 
 pub use error::{Error, Result};

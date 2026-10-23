@@ -373,6 +373,60 @@ fn tab_moves_between_windows() {
 }
 
 #[test]
+fn system_shortcuts_follow_settings() {
+    let mut s = state();
+    let mut new = s.settings.clone();
+    new.keybindings.clear();
+    // Sans changement de ces réglages : rien à appliquer.
+    let fx = update(&mut s, Msg::UpdateSettings(Box::new(new.clone())));
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::SystemShortcuts { .. }))
+    );
+    new.win_e_opens_folder = true;
+    let fx = update(&mut s, Msg::UpdateSettings(Box::new(new.clone())));
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::SystemShortcuts {
+            win_e: true,
+            open_hotkey: None
+        }
+    )));
+    new.win_e_opens_folder = false;
+    new.open_hotkey = fx_commands::HotKey::parse("Ctrl+Alt+F");
+    let fx = update(&mut s, Msg::UpdateSettings(Box::new(new)));
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::SystemShortcuts {
+            win_e: false,
+            open_hotkey: Some(_)
+        }
+    )));
+}
+
+#[test]
+fn startup_ensures_win_e_helper_only_when_enabled() {
+    let has = |fx: &[Effect]| fx.iter().any(|e| matches!(e, Effect::EnsureWinE));
+    let mut s = state();
+    assert!(!has(&update(
+        &mut s,
+        Msg::Startup {
+            start: None,
+            session: None
+        }
+    )));
+    let mut s = state();
+    s.settings.win_e_opens_folder = true;
+    assert!(has(&update(
+        &mut s,
+        Msg::Startup {
+            start: None,
+            session: None
+        }
+    )));
+}
+
+#[test]
 fn drop_on_recycle_bin_asks_then_deletes() {
     let mut s = state();
     let items = vec![PathBuf::from(r"C:\a\x.txt")];

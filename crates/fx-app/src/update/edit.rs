@@ -295,6 +295,12 @@ pub fn update_settings(state: &mut AppState, new: Settings) -> Vec<Effect> {
     if old.keybindings != s.keybindings {
         state.keymap = fx_commands::KeyMap::new(&s.keybindings);
     }
+    if old.win_e_opens_folder != s.win_e_opens_folder || old.open_hotkey != s.open_hotkey {
+        fx.push(Effect::SystemShortcuts {
+            win_e: s.win_e_opens_folder,
+            open_hotkey: s.open_hotkey,
+        });
+    }
     if old.show_preview && !s.show_preview {
         state.preview = None;
     }
