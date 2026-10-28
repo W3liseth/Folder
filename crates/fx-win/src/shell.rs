@@ -47,12 +47,20 @@ fn execute(
     Ok(())
 }
 
+/// Dossier de travail du programme lancé : celui du fichier, comme l'Explorateur. Sans lui,
+/// ShellExecute prend le dossier courant de folder (`C:\Program Files\folder`) et un script
+/// (.bat, .ps1, .py…) ne trouve pas les fichiers qui l'entourent.
+fn working_dir(path: &Path) -> Option<&Path> {
+    path.parent().filter(|d| !d.as_os_str().is_empty())
+}
+
 /// Ouvre un fichier avec son application par défaut (verbe « open »).
 ///
 /// Bloquant tant que le shell résout l'association : depuis un thread STA de travail.
 pub fn open(path: &Path) -> Result<()> {
     // Pas de forme \\?\ ici : de nombreuses applications ne la comprennent pas.
-    execute(None, w!("open"), &wide(path), None, None)
+    let dir = working_dir(path).map(wide);
+    execute(None, w!("open"), &wide(path), None, dir.as_deref())
 }
 
 /// Ouvre un élément de l'espace de noms du shell désigné par son nom d'analyse
@@ -121,7 +129,8 @@ pub fn properties_page(hwnd: Option<isize>, path: &Path, page: &str) -> Result<(
 
 /// Exécute en tant qu'administrateur (invite UAC).
 pub fn run_as_admin(hwnd: Option<isize>, path: &Path) -> Result<()> {
-    execute(hwnd, w!("runas"), &wide(path), None, None)
+    let dir = working_dir(path).map(wide);
+    execute(hwnd, w!("runas"), &wide(path), None, dir.as_deref())
 }
 
 /// Ouvre un terminal dans `dir` : Windows Terminal s'il est installé, sinon l'invite de commandes.
@@ -177,4 +186,25 @@ pub fn empty_recycle_bin(hwnd: Option<isize>) -> Result<()> {
     // SAFETY: racine nulle = tous les lecteurs.
     unsafe { SHEmptyRecycleBinW(owner(hwnd), PCWSTR::null(), SHERB_NOCONFIRMATION) }
         .op("SHEmptyRecycleBinW")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::working_dir;
+    use std::path::Path;
+
+    #[test]
+    fn working_dir_is_the_file_folder() {
+        assert_eq!(
+            working_dir(Path::new(r"D:\projets\outils\build.bat")),
+            Some(Path::new(r"D:\projets\outils"))
+        );
+        assert_eq!(
+            working_dir(Path::new(r"C:\script.ps1")),
+            Some(Path::new(r"C:\"))
+        );
+        // Ni racine ni nom seul : on laisse ShellExecute décider.
+        assert_eq!(working_dir(Path::new(r"C:\")), None);
+        assert_eq!(working_dir(Path::new("script.bat")), None);
+    }
 }
