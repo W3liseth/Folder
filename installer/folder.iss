@@ -1,7 +1,7 @@
 ; Installeur Windows de folder (Inno Setup 6).
 ;
 ; Construction locale (après `cargo build --release -p folder`) :
-;   iscc /DAppVersion=0.6.0 installer\folder.iss
+;   iscc /DAppVersion=0.7.0 installer\folder.iss
 ; Sortie : target\installer\folder-setup-<version>-x64.exe
 ; En CI : .github/workflows/installer.yml.
 ;
@@ -10,7 +10,7 @@
 ; l'utilisateur (%APPDATA%\folder, %LOCALAPPDATA%\folder) sont conservés à la désinstallation.
 
 #ifndef AppVersion
-  #define AppVersion "0.6.0"
+  #define AppVersion "0.7.0"
 #endif
 #define AppName "folder"
 #define AppExe "folder.exe"

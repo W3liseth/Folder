@@ -44,8 +44,9 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     }
                 }
                 ui.add_space(6.0);
-                // Rechercher et palette de commandes : boutons ouvrant chacun leur fenêtre.
-                let omni_w = ui.available_width() - 2.0 * size.x - 10.0;
+                // Rechercher, palette de commandes et centre d'état : boutons ouvrant chacun
+                // leur fenêtre.
+                let omni_w = ui.available_width() - 3.0 * size.x - 10.0;
                 omnibar(ui, f, omni_w);
                 ui.add_space(6.0);
                 for (cmd, open) in [
@@ -76,6 +77,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                         f.cmd(cmd);
                     }
                 }
+                super::statuscenter::button(ui, f, size);
             });
         });
 }

@@ -26,6 +26,7 @@ pub(crate) mod settings;
 mod shellmenu;
 mod sidebar;
 mod status;
+mod statuscenter;
 mod titlebar;
 mod toasts;
 mod toolbar;
@@ -106,7 +107,8 @@ pub struct ViewState {
     pub(crate) hwnd: Option<isize>,
     pub(crate) styled_dark: Option<bool>,
     pub(crate) fallbacks: theme::Fallbacks,
-    pub(crate) status_center: bool,
+    /// Bouton du centre d'état à l'image courante (ancre de son menu).
+    pub(crate) status_anchor: Option<egui::Rect>,
     /// Emplacement actif à l'image précédente (abandon des icônes en attente au changement).
     pub(crate) last_location: Option<Location>,
     pub(crate) diag: diagnostics::Sample,
@@ -156,7 +158,7 @@ impl ViewState {
             hwnd: None,
             styled_dark: None,
             fallbacks: theme::Fallbacks::default(),
-            status_center: false,
+            status_anchor: None,
             last_location: None,
             diag: diagnostics::Sample::default(),
             dont_ask_delete: false,
@@ -305,7 +307,7 @@ pub fn draw(
         }))
         .show(ui, |ui| pane::draw_tab(ui, &mut f));
 
-    status::draw_center(&ctx, &mut f);
+    statuscenter::draw(&ctx, &mut f);
     toasts::draw(&ctx, &mut f);
     dialogs::draw(&ctx, &mut f);
     palette::draw(&ctx, &mut f);
@@ -396,7 +398,7 @@ fn keyboard(ctx: &egui::Context, f: &mut Fx<'_>) {
             continue;
         }
         if hk.key == Key::Escape {
-            if f.state.show_palette || f.state.show_search {
+            if f.state.show_palette || f.state.show_search || f.state.show_status_center {
                 f.send(Msg::CloseOverlays);
                 continue;
             }

@@ -5,14 +5,14 @@ use fx_commands::CommandId;
 use fx_core::entry::attrs;
 use fx_core::{Batch, SortDir, SortKey};
 use fx_fs::{Change, DirEvent, EnumStats, Outcome};
-use fx_store::{Layout, Settings};
+use fx_store::{Layout, OpEntry, OpOutcome, Settings};
 use fx_win::fileop::{FileOp, OpEvent};
 use fx_win::sys::Stat;
 
-use crate::effect::Effect;
+use crate::effect::{Effect, Persist};
 use crate::history::Location;
 use crate::msg::Msg;
-use crate::ops::Job;
+use crate::ops::{Job, OpStatus};
 use crate::state::{AppState, Dialog, ListingStatus, PaneId, Tags};
 use crate::update::update;
 
@@ -129,6 +129,56 @@ fn startup_opens_home_and_loads_sidebar_data() {
     assert_eq!(s.pane().location(), &Location::Home);
     assert!(fx.iter().any(|e| matches!(e, Effect::LoadDrives)));
     assert!(fx.iter().any(|e| matches!(e, Effect::LoadKnownFolders)));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Persist(Persist::LoadOps))),
+        "historique du centre d'état"
+    );
+}
+
+#[test]
+fn status_center_history_loads_from_db_and_reloads_on_open() {
+    let mut s = state();
+    let entry = |ended, outcome| OpEntry {
+        ended,
+        title: format!("op {ended}"),
+        items: 1,
+        outcome,
+        duration_ms: 2000,
+    };
+    // Lancement : les échecs des sessions précédentes ne font pas de pastille.
+    update(
+        &mut s,
+        Msg::OpHistoryLoaded(vec![
+            entry(2, OpOutcome::Done),
+            entry(1, OpOutcome::Failed("x".into())),
+        ]),
+    );
+    assert_eq!(s.op_history.len(), 2);
+    assert!(!s.op_history.has_unseen_failure());
+    let first = s.op_history.last_id();
+    // Une autre fenêtre a échoué : pastille jusqu'à l'ouverture du centre.
+    update(
+        &mut s,
+        Msg::OpHistoryLoaded(vec![
+            entry(3, OpOutcome::Failed("y".into())),
+            entry(2, OpOutcome::Done),
+            entry(1, OpOutcome::Failed("x".into())),
+        ]),
+    );
+    assert!(s.op_history.has_unseen_failure());
+    assert_eq!(
+        s.op_history.iter().nth(1).map(|r| r.id),
+        first,
+        "id conservé"
+    );
+    let fx = update(&mut s, Msg::Command(CommandId::StatusCenter));
+    assert!(matches!(&fx[..], [Effect::Persist(Persist::LoadOps)]));
+    assert!(!s.op_history.has_unseen_failure());
+    assert!(
+        update(&mut s, Msg::Command(CommandId::StatusCenter)).is_empty(),
+        "fermeture : rien à lire"
+    );
 }
 
 #[test]
@@ -612,6 +662,79 @@ fn finished_copy_can_be_undone_and_redone() {
     );
     let fx = update(&mut s, Msg::Command(CommandId::Redo));
     assert!(matches!(job(&fx), Job::File(FileOp::Copy { .. })));
+}
+
+#[test]
+fn finished_ops_go_to_status_center_history_until_cleared() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    let start = |s: &mut AppState, name: &str| {
+        op_id(&update(
+            s,
+            Msg::DropPaths {
+                dest: r"C:\a".into(),
+                paths: vec![PathBuf::from(format!(r"D:\{name}"))],
+                copy: None,
+            },
+        ))
+    };
+    let (a, b) = (start(&mut s, "x.txt"), start(&mut s, "y.txt"));
+    assert!(!s.command_context().has_op_history);
+    let finish = |s: &mut AppState, op, result| {
+        let saved: Vec<OpEntry> = update(s, Msg::OpFinished { op, result })
+            .into_iter()
+            .filter_map(|e| match e {
+                Effect::Persist(Persist::AddOp(e)) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(saved.len(), 1, "enregistrée dans la base");
+        saved.into_iter().next().expect("entrée")
+    };
+    let saved_a = finish(&mut s, a, Ok(false));
+    let saved_b = finish(&mut s, b, Err("accès refusé".into()));
+    assert_eq!(saved_b.outcome, OpOutcome::Failed("accès refusé".into()));
+    assert!(saved_b.ended > saved_a.ended, "(fin, titre) unique");
+    assert!(s.ops.is_empty(), "plus rien en cours");
+    assert!(s.op_history.has_unseen_failure(), "pastille d'échec");
+    let hist: Vec<_> = s
+        .op_history
+        .iter()
+        .map(|r| (r.id, r.status.clone()))
+        .collect();
+    assert_eq!(
+        hist,
+        vec![
+            (b, OpStatus::Failed("accès refusé".into())),
+            (a, OpStatus::Done)
+        ],
+        "la plus récente en premier"
+    );
+
+    let fx = update(&mut s, Msg::DismissOp(b));
+    assert!(
+        matches!(&fx[..], [Effect::Persist(Persist::RemoveOp { ended, title })] if *ended == saved_b.ended && *title == saved_b.title)
+    );
+    assert_eq!(s.op_history.last_id(), Some(a));
+    assert!(s.command_context().has_op_history);
+    assert!(CommandId::ClearOperationHistory.is_enabled(&s.command_context()));
+    let fx = update(&mut s, Msg::Command(CommandId::ClearOperationHistory));
+    assert!(matches!(&fx[..], [Effect::Persist(Persist::ClearOps)]));
+    assert!(s.op_history.is_empty());
+    assert!(!CommandId::ClearOperationHistory.is_enabled(&s.command_context()));
+}
+
+#[test]
+fn status_center_excludes_search_and_palette() {
+    let mut s = state();
+    update(&mut s, Msg::Command(CommandId::Search));
+    update(&mut s, Msg::Command(CommandId::StatusCenter));
+    assert!(s.show_status_center && !s.show_search && !s.show_palette);
+    update(&mut s, Msg::Command(CommandId::CommandPalette));
+    assert!(!s.show_status_center && s.show_palette);
+    update(&mut s, Msg::Command(CommandId::StatusCenter));
+    update(&mut s, Msg::CloseOverlays);
+    assert!(!s.show_status_center);
 }
 
 #[test]

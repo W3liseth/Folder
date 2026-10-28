@@ -6,7 +6,7 @@ use fx_commands::CommandId;
 use fx_core::{SortDir, SortKey, SortSpec};
 use fx_store::{Layout, ThemeChoice};
 
-use crate::effect::Effect;
+use crate::effect::{Effect, Persist};
 use crate::history::Location;
 use crate::msg::Msg;
 use crate::ops::Job;
@@ -59,16 +59,34 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.requests.focus_path = true;
             vec![]
         }
-        // Recherche et palette : deux fenêtres flottantes exclusives.
+        // Recherche, palette et centre d'état : fenêtres flottantes exclusives.
         Search => {
             state.show_search = !state.show_search;
             state.show_palette = false;
+            state.show_status_center = false;
             vec![]
         }
         CommandPalette => {
             state.show_palette = !state.show_palette;
             state.show_search = false;
+            state.show_status_center = false;
             vec![]
+        }
+        StatusCenter => {
+            state.show_status_center = !state.show_status_center;
+            state.show_search = false;
+            state.show_palette = false;
+            if state.show_status_center {
+                state.op_history.mark_seen();
+                // Les autres fenêtres ont pu compléter ou effacer l'historique.
+                vec![Effect::Persist(Persist::LoadOps)]
+            } else {
+                vec![]
+            }
+        }
+        ClearOperationHistory => {
+            state.op_history.clear();
+            vec![Effect::Persist(Persist::ClearOps)]
         }
 
         NewTab => nav::open_tab(state, Location::Home),

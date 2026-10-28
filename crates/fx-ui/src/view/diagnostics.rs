@@ -86,7 +86,15 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                         format!("{:.1} ms", t.as_secs_f64() * 1000.0)
                     }),
                 );
-                kv("Opérations", f.state.ops.len().to_string());
+                kv(
+                    "Opérations",
+                    format!(
+                        "{} en cours ; historique {} / {}",
+                        f.state.ops.len(),
+                        f.state.op_history.len(),
+                        fx_app::ops::MAX_HISTORY
+                    ),
+                );
             });
         });
     if !open {

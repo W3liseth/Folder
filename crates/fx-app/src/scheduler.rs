@@ -685,6 +685,8 @@ fn persist(paths: &Paths, db: &Mutex<Option<Db>>, p: Persist, out: &Outbox) {
         other => {
             let Ok(guard) = db.lock() else { return };
             let Some(db) = guard.as_ref() else { return };
+            let send_ops =
+                |db: &Db, out: &Outbox| db.op_history().map(|h| out.send(Msg::OpHistoryLoaded(h)));
             match other {
                 Persist::Tags { path, tags } => db.set_tags(&path, &tags),
                 Persist::Tag(tag) => db
@@ -693,6 +695,13 @@ fn persist(paths: &Paths, db: &Mutex<Option<Db>>, p: Persist, out: &Outbox) {
                 Persist::DeleteTag(id) => db.delete_tag(id),
                 Persist::MovePath { from, to } => db.move_path(&from, &to),
                 Persist::FolderPrefs { path, prefs } => db.set_folder_prefs(&path, prefs),
+                // Réponse envoyée sous le verrou : dans l'ordre des écritures.
+                Persist::AddOp(e) => db.add_op(&e).and_then(|()| send_ops(db, out)),
+                Persist::RemoveOp { ended, title } => {
+                    db.remove_op(ended, &title).and_then(|()| send_ops(db, out))
+                }
+                Persist::ClearOps => db.clear_ops().and_then(|()| send_ops(db, out)),
+                Persist::LoadOps => send_ops(db, out),
                 Persist::Settings(_) | Persist::Session(_) => Ok(()),
             }
             .map_err(|e| e.to_string())
@@ -805,6 +814,55 @@ mod tests {
             git_branch(&d.join("src").join("deep")).as_deref(),
             Some("feature/x")
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Deux fenêtres (deux processus) sur la même base : l'historique des opérations est
+    /// partagé, chaque écriture répond par l'historique à jour.
+    #[test]
+    fn op_history_is_shared_through_the_db() {
+        let d = std::env::temp_dir().join(format!("fx-ops-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let paths = Paths::in_dir(&d);
+        let window = || {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            let db = Db::open(&paths).expect("db");
+            let s = Scheduler::new(
+                1,
+                tx,
+                Arc::new(|| {}),
+                Arc::new(|_, _| {}),
+                paths.clone(),
+                Some(db),
+            )
+            .expect("scheduler");
+            (s, rx)
+        };
+        let loaded = |rx: &crossbeam_channel::Receiver<Msg>| loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(Msg::OpHistoryLoaded(h)) => break h,
+                Ok(_) => {}
+                Err(e) => panic!("pas de réponse : {e}"),
+            }
+        };
+        let (a, rx_a) = window();
+        let (b, rx_b) = window();
+        let entry = fx_store::OpEntry {
+            ended: 42,
+            title: "Copie de « x.txt » vers Docs".into(),
+            items: 1,
+            outcome: fx_store::OpOutcome::Done,
+            duration_ms: 1200,
+        };
+        a.dispatch(Effect::Persist(Persist::AddOp(entry.clone())));
+        assert_eq!(loaded(&rx_a), vec![entry.clone()]);
+        b.dispatch(Effect::Persist(Persist::LoadOps));
+        assert_eq!(loaded(&rx_b), vec![entry], "visible depuis l'autre fenêtre");
+        b.dispatch(Effect::Persist(Persist::ClearOps));
+        assert!(loaded(&rx_b).is_empty());
+        a.dispatch(Effect::Persist(Persist::LoadOps));
+        assert!(loaded(&rx_a).is_empty(), "effacé pour toutes les fenêtres");
+        drop((a, b));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -1,11 +1,13 @@
-//! Centre d'opérations (copies, déplacements, suppressions… en cours) et historique
-//! d'annulation.
+//! Centre d'état (copies, déplacements, suppressions… en cours, et historique des
+//! opérations terminées) et historique d'annulation.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use fx_store::{OpEntry, OpOutcome};
 use fx_win::fileop::FileOp;
 
 /// Travail long exécuté sur un thread dédié.
@@ -214,6 +216,149 @@ impl Operation {
     }
 }
 
+/// Opération terminée, dans l'historique du centre d'état. Ne garde que ce qui s'affiche :
+/// les chemins créés ou déplacés (jusqu'à des milliers) restent dans l'entrée d'annulation.
+/// L'historique est enregistré dans `folder.db` (partagé par toutes les fenêtres) ; `id` est
+/// propre à ce processus, la base identifie une opération par `(ended, title)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpRecord {
+    pub id: u64,
+    pub title: String,
+    pub items: usize,
+    pub status: OpStatus,
+    pub duration: Duration,
+    /// Fin de l'opération (FILETIME UTC), pour afficher l'heure.
+    pub ended: i64,
+}
+
+impl OpRecord {
+    pub(crate) fn of(op: &Operation, ended: i64) -> Self {
+        Self {
+            id: op.id,
+            title: op.title.clone(),
+            items: op.items,
+            status: op.status.clone(),
+            duration: op.started.elapsed(),
+            ended,
+        }
+    }
+
+    pub(crate) fn entry(&self) -> OpEntry {
+        OpEntry {
+            ended: self.ended,
+            title: self.title.clone(),
+            items: u32::try_from(self.items).unwrap_or(u32::MAX),
+            outcome: match &self.status {
+                OpStatus::Failed(e) => OpOutcome::Failed(e.clone()),
+                OpStatus::Cancelled => OpOutcome::Cancelled,
+                OpStatus::Done | OpStatus::Running => OpOutcome::Done,
+            },
+            duration_ms: u64::try_from(self.duration.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
+    fn from_entry(id: u64, e: OpEntry) -> Self {
+        Self {
+            id,
+            title: e.title,
+            items: e.items as usize,
+            status: match e.outcome {
+                OpOutcome::Done => OpStatus::Done,
+                OpOutcome::Cancelled => OpStatus::Cancelled,
+                OpOutcome::Failed(err) => OpStatus::Failed(err),
+            },
+            duration: Duration::from_millis(e.duration_ms),
+            ended: e.ended,
+        }
+    }
+}
+
+/// Historique des opérations terminées (borné, la plus récente en dernier).
+#[derive(Debug, Default)]
+pub struct OpHistory {
+    entries: VecDeque<OpRecord>,
+    /// Fin de la dernière opération vue dans le centre d'état (pastille d'échec).
+    seen: i64,
+    /// Premier chargement depuis la base reçu (ce qui précède ce lancement est déjà vu).
+    loaded: bool,
+}
+
+pub const MAX_HISTORY: usize = fx_store::MAX_OP_HISTORY;
+
+impl OpHistory {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Du plus récent au plus ancien.
+    pub fn iter(&self) -> impl Iterator<Item = &OpRecord> {
+        self.entries.iter().rev()
+    }
+
+    /// Identifiant de l'opération terminée la plus récente.
+    pub fn last_id(&self) -> Option<u64> {
+        self.entries.back().map(|r| r.id)
+    }
+
+    /// Un échec terminé depuis la dernière ouverture du centre d'état.
+    pub fn has_unseen_failure(&self) -> bool {
+        self.iter()
+            .take_while(|r| r.ended > self.seen)
+            .any(|r| matches!(r.status, OpStatus::Failed(_)))
+    }
+
+    pub(crate) fn mark_seen(&mut self) {
+        self.seen = self.seen.max(self.entries.back().map_or(0, |r| r.ended));
+    }
+
+    /// Fin à enregistrer pour une opération qui se termine à `now` : strictement après la
+    /// précédente, pour que `(ended, title)` reste unique.
+    pub(crate) fn next_end(&self, now: i64) -> i64 {
+        self.entries.back().map_or(now, |r| now.max(r.ended + 1))
+    }
+
+    pub(crate) fn push(&mut self, r: OpRecord) {
+        if self.entries.len() == MAX_HISTORY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(r);
+    }
+
+    pub(crate) fn remove(&mut self, id: u64) -> Option<OpRecord> {
+        let i = self.entries.iter().position(|r| r.id == id)?;
+        self.entries.remove(i)
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.entries = VecDeque::new();
+    }
+
+    /// Remplace l'historique par celui de la base (`entries` : du plus récent au plus
+    /// ancien). Les opérations déjà affichées gardent leur identifiant.
+    pub(crate) fn replace(&mut self, entries: Vec<OpEntry>, mut next_id: impl FnMut() -> u64) {
+        let old = std::mem::take(&mut self.entries);
+        self.entries = entries
+            .into_iter()
+            .rev()
+            .map(|e| {
+                let id = old
+                    .iter()
+                    .find(|r| r.ended == e.ended && r.title == e.title)
+                    .map_or_else(&mut next_id, |r| r.id);
+                OpRecord::from_entry(id, e)
+            })
+            .collect();
+        if !self.loaded {
+            self.loaded = true;
+            self.mark_seen();
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UndoEntry {
     pub label: String,
@@ -318,6 +463,78 @@ mod tests {
                 permanent: false
             })])
         );
+    }
+
+    #[test]
+    fn history_is_bounded_and_newest_first() {
+        let mut h = OpHistory::default();
+        for id in 0..(MAX_HISTORY as u64 + 5) {
+            h.push(OpRecord {
+                id,
+                title: String::new(),
+                items: 1,
+                status: OpStatus::Done,
+                duration: Duration::ZERO,
+                ended: 0,
+            });
+        }
+        assert_eq!(h.len(), MAX_HISTORY);
+        assert_eq!(h.iter().next().map(|r| r.id), Some(MAX_HISTORY as u64 + 4));
+        assert_eq!(h.iter().last().map(|r| r.id), Some(5));
+        h.remove(10);
+        assert_eq!(h.len(), MAX_HISTORY - 1);
+        h.clear();
+        assert!(h.is_empty() && h.last_id().is_none());
+    }
+
+    #[test]
+    fn reload_keeps_ids_and_tracks_unseen_failures() {
+        let rec = |id, ended, status| OpRecord {
+            id,
+            title: format!("op {ended}"),
+            items: 1,
+            status,
+            duration: Duration::from_millis(1500),
+            ended,
+        };
+        let mut h = OpHistory::default();
+        let old_failure = rec(0, 5, OpStatus::Failed("x".into()));
+        let done = rec(0, 10, OpStatus::Done);
+        let mut ids = 100..;
+        // Premier chargement : ce qui précède ce lancement est déjà vu.
+        h.replace(vec![done.entry(), old_failure.entry()], || {
+            ids.next().expect("id")
+        });
+        assert_eq!(h.iter().map(|r| r.id).collect::<Vec<_>>(), [101, 100]);
+        assert_eq!(
+            h.iter().next(),
+            Some(&OpRecord {
+                id: 101,
+                ..done.clone()
+            })
+        );
+        assert!(!h.has_unseen_failure());
+        assert_eq!(h.next_end(3), 11, "toujours après la précédente");
+
+        h.push(rec(7, 20, OpStatus::Failed("Accès refusé.".into())));
+        assert!(h.has_unseen_failure());
+        // Rechargement (une autre fenêtre a ajouté une opération) : identifiants conservés.
+        let other = rec(0, 30, OpStatus::Done);
+        let entries: Vec<OpEntry> = std::iter::once(other.entry())
+            .chain(h.iter().map(OpRecord::entry))
+            .collect();
+        h.replace(entries, || ids.next().expect("id"));
+        assert_eq!(
+            h.iter().map(|r| r.id).collect::<Vec<_>>(),
+            [102, 7, 101, 100]
+        );
+        assert!(
+            h.has_unseen_failure(),
+            "un rechargement ne vaut pas lecture"
+        );
+        h.mark_seen();
+        assert!(!h.has_unseen_failure());
+        assert_eq!(h.remove(7).map(|r| r.ended), Some(20));
     }
 
     #[test]

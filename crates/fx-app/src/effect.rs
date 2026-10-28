@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use fx_core::CancelToken;
 use fx_fs::EnumOptions;
-use fx_store::{FolderPrefs, Session, Settings, Tag, TagId};
+use fx_store::{FolderPrefs, OpEntry, Session, Settings, Tag, TagId};
 
 use crate::ops::Job;
 use crate::state::PaneId;
@@ -21,11 +21,33 @@ pub enum Target {
 pub enum Persist {
     Settings(Box<Settings>),
     Session(Session),
-    Tags { path: PathBuf, tags: Vec<TagId> },
+    Tags {
+        path: PathBuf,
+        tags: Vec<TagId>,
+    },
     Tag(Tag),
     DeleteTag(TagId),
-    MovePath { from: PathBuf, to: PathBuf },
-    FolderPrefs { path: PathBuf, prefs: FolderPrefs },
+    MovePath {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    FolderPrefs {
+        path: PathBuf,
+        prefs: FolderPrefs,
+    },
+    /// Historique des opérations (centre d'état). Chacune répond par
+    /// `Msg::OpHistoryLoaded` avec l'historique de la base après l'écriture, envoyé sous le
+    /// verrou de la base : les réponses arrivent dans l'ordre des écritures, même venant de
+    /// plusieurs threads d'I/O.
+    AddOp(OpEntry),
+    RemoveOp {
+        ended: i64,
+        title: String,
+    },
+    ClearOps,
+    /// Simple lecture (démarrage, ouverture du centre d'état : les autres fenêtres écrivent
+    /// aussi dans la base).
+    LoadOps,
 }
 
 /// Travail demandé par `update`, exécuté hors du thread UI par le `Scheduler`.

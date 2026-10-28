@@ -10,7 +10,7 @@ use fx_store::{FolderPrefs, Layout, Settings, Tag, TagId};
 use fx_win::sys::{Drive, KnownFolder};
 
 use crate::history::{History, Location};
-use crate::ops::{Operation, UndoStack};
+use crate::ops::{OpHistory, Operation, UndoStack};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PaneId(pub u64);
@@ -374,7 +374,10 @@ pub struct AppState {
     pub wsl: Vec<String>,
     pub tags: Tags,
     pub folder_prefs: HashMap<String, FolderPrefs>,
+    /// Opérations en cours (centre d'état).
     pub ops: Vec<Operation>,
+    /// Opérations terminées (centre d'état), effaçable.
+    pub op_history: OpHistory,
     pub undo: UndoStack,
     pub clipboard_has_files: bool,
     pub toasts: Vec<Toast>,
@@ -384,6 +387,8 @@ pub struct AppState {
     pub show_palette: bool,
     /// Fenêtre de recherche (bouton Rechercher, Ctrl+F).
     pub show_search: bool,
+    /// Centre d'état (bouton à côté de Rechercher et de la palette).
+    pub show_status_center: bool,
     pub show_diagnostics: bool,
     /// Mise à jour : dernière vérification connue, installeur prêt.
     pub update: crate::upgrade::Status,
@@ -414,6 +419,7 @@ impl AppState {
                 .map(|(p, f)| (p.to_string_lossy().to_lowercase(), f))
                 .collect(),
             ops: Vec::new(),
+            op_history: OpHistory::default(),
             undo: UndoStack::default(),
             clipboard_has_files: false,
             toasts: Vec::new(),
@@ -422,6 +428,7 @@ impl AppState {
             preview: None,
             show_palette: false,
             show_search: false,
+            show_status_center: false,
             show_diagnostics: false,
             update: crate::upgrade::Status::Unknown,
             requests: UiRequests::default(),
@@ -542,6 +549,7 @@ impl AppState {
                 .any(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))),
             in_recycle_bin: matches!(pane.location(), Location::RecycleBin),
             update_ready: self.update.ready_version().is_some(),
+            has_op_history: !self.op_history.is_empty(),
         }
     }
 

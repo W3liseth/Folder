@@ -97,7 +97,7 @@ avec pour description sa section de `CHANGELOG.md` : tout changement de version 
 vérifié par `cargo test`) :
 
 ```bash
-iscc /DAppVersion=0.6.0 installer/folder.iss
+iscc /DAppVersion=0.7.0 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :

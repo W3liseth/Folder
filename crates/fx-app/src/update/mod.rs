@@ -145,12 +145,22 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             }
             vec![]
         }
-        Msg::DismissOp(id) => {
-            state.ops.retain(|o| o.id != id || o.is_running());
-            vec![]
-        }
-        Msg::ClearFinishedOps => {
-            state.ops.retain(crate::ops::Operation::is_running);
+        Msg::DismissOp(id) => state.op_history.remove(id).map_or_else(Vec::new, |r| {
+            vec![Effect::Persist(Persist::RemoveOp {
+                ended: r.ended,
+                title: r.title,
+            })]
+        }),
+        Msg::OpHistoryLoaded(entries) => {
+            let mut next = state.next_id;
+            state.op_history.replace(entries, || {
+                next += 1;
+                next - 1
+            });
+            state.next_id = next;
+            if state.show_status_center {
+                state.op_history.mark_seen();
+            }
             vec![]
         }
         Msg::DismissToast(id) => {
@@ -218,6 +228,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
         }
         Msg::TogglePalette => {
             state.show_palette = !state.show_palette;
+            state.show_status_center = false;
             vec![]
         }
         Msg::ConsumeRequests => {
@@ -227,6 +238,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
         Msg::CloseOverlays => {
             state.show_palette = false;
             state.show_search = false;
+            state.show_status_center = false;
             vec![]
         }
 

@@ -2,7 +2,8 @@
 //!
 //! - `settings.toml` (dans `%APPDATA%\folder`) : réglages et raccourcis personnalisés ;
 //! - `session.toml` (dans `%LOCALAPPDATA%\folder`) : onglets ouverts ;
-//! - `folder.db` (SQLite, `%LOCALAPPDATA%\folder`) : étiquettes et préférences d'affichage par dossier ;
+//! - `folder.db` (SQLite, `%LOCALAPPDATA%\folder`) : étiquettes, préférences d'affichage par
+//!   dossier et historique des opérations du centre d'état ;
 //! - `update.toml` et `updates\` (`%LOCALAPPDATA%\folder`) : dernière vérification de mise à
 //!   jour, installeur téléchargé.
 //!
@@ -16,7 +17,7 @@ mod settings;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use db::{Db, FolderPrefs, Tag, TagId};
+pub use db::{Db, FolderPrefs, MAX_OP_HISTORY, OpEntry, OpOutcome, Tag, TagId};
 pub use settings::{
     Layout, PaneSession, Session, Settings, TabSession, ThemeChoice, WindowPlacement,
 };

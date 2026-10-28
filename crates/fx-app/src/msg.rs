@@ -125,8 +125,8 @@ pub enum Msg {
     ShowAbout,
     BulkRenameApply(Vec<(PathBuf, String)>),
     CancelOp(u64),
+    /// Retire une opération terminée de l'historique du centre d'état.
     DismissOp(u64),
-    ClearFinishedOps,
     DismissToast(u64),
     /// Exécute une commande de menu shell déjà invoquée (signalement : actualiser…).
     ShellInvoked {
@@ -196,6 +196,8 @@ pub enum Msg {
     DrivesLoaded(Vec<Drive>),
     KnownLoaded(Vec<(KnownFolder, PathBuf)>),
     RecentLoaded(Vec<RecentItem>),
+    /// Historique des opérations lu dans la base (du plus récent au plus ancien).
+    OpHistoryLoaded(Vec<fx_store::OpEntry>),
     PreviewLoaded(Option<Preview>),
     GitBranch {
         pane: PaneId,

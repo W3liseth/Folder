@@ -32,6 +32,8 @@ pub struct CommandContext {
     pub in_recycle_bin: bool,
     /// Une mise à jour est téléchargée et prête à être installée.
     pub update_ready: bool,
+    /// Le centre d'état a des opérations terminées.
+    pub has_op_history: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +160,8 @@ commands! {
     ToggleTheme => Application, "Basculer clair / sombre", "\u{E793}", [];
     FullScreen => Application, "Plein écran", "\u{E740}", ["F11"];
     Diagnostics => Application, "Diagnostics", "\u{E9D9}", ["F12"];
+    StatusCenter => Application, "Centre d'état", "\u{E81C}", [];
+    ClearOperationHistory => Application, "Effacer l'historique des opérations", "\u{E74D}", [];
     CheckForUpdates => Application, "Rechercher les mises à jour", "\u{E895}", [];
     InstallUpdate => Application, "Installer la mise à jour", "\u{E896}", [];
     ReleaseNotes => Application, "Notes de version", "\u{E7BC}", [];
@@ -199,6 +203,7 @@ impl CommandId {
             Redo => c.can_redo,
             EmptyRecycleBin => true,
             InstallUpdate => c.update_ready,
+            ClearOperationHistory => c.has_op_history,
             _ => true,
         }
     }

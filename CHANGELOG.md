@@ -5,6 +5,18 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.7.0 — 2026-10-29
+
+- Centre d'état : un bouton à côté de Rechercher et de la palette de commandes remplace
+  l'encart en bas à droite. Il montre les copies, déplacements et suppressions en cours
+  (progression, temps restant, annulation), puis l'historique des opérations terminées avec
+  leur issue, leur heure et leur durée. Un anneau autour du bouton suit la progression, un
+  point rouge signale un échec.
+- Historique des opérations conservé d'un lancement à l'autre et commun à toutes les
+  fenêtres (100 dernières) ; « Effacer l'historique » le vide, une croix retire une ligne.
+  Aussi depuis la palette de commandes : « Centre d'état », « Effacer l'historique des
+  opérations ».
+
 ## 0.6.0 — 2026-10-28
 
 - Mise à jour automatique : folder recherche une nouvelle version au démarrage (au plus une

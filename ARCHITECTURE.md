@@ -581,7 +581,7 @@ pub trait Action: Send + Sync {
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Onglets ─────────────────────────────────────────────── [ _ □ X ]   │  barre de titre personnalisée
 ├─────────────────────────────────────────────────────────────────────┤
-│ ← → ↑ ⟳ │ Omnibar : C: › Users › moi › Documents        │ 🔍 │ ⋯   │
+│ ← → ↑ ⟳ │ Omnibar : C: › Users › moi › Documents     │ 🔍 │ ⋯ │ ◷  │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Barre d'outils (Nouveau, Couper, Copier, Coller, Renommer, Trier…)  │
 ├───────────┬───────────────────────────────────────────┬─────────────┤
@@ -590,7 +590,7 @@ pub trait Action: Send + Sync {
 │ Lecteurs  │  ...                                      │ (optionnel) │
 │ Étiquettes│                                           │             │
 ├───────────┴───────────────────────────────────────────┴─────────────┤
-│ Barre d'état : 1 245 éléments · 3 sélectionnés (12,4 Mo)   ◷ 2 ops  │
+│ Barre d'état : 1 245 éléments · 3 sélectionnés (12,4 Mo)            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -623,6 +623,7 @@ pub trait Action: Send + Sync {
 | Session (onglets, volets, historique Précédent/Suivant : 30 entrées par sens) | `session.toml`, écrit à la fermeture + toutes les 30 s si modifié | `%LOCALAPPDATA%\folder\` |
 | Préférences par dossier (vue, tri, colonnes) | SQLite `folder.db`, table `layout_prefs(path_hash, …)` | `%LOCALAPPDATA%\folder\` |
 | Étiquettes | SQLite `folder.db`, tables `tags`, `tagged(file_id, volume_serial, path, tag_id)` | idem |
+| Historique du centre d'état (100 dernières opérations terminées : titre, issue, heure, durée) | SQLite `folder.db`, table `op_history`, écrite à chaque fin d'opération ; partagée par toutes les fenêtres, relue au lancement et à l'ouverture du centre | idem |
 
 Clé d'étiquette : `(numéro de série du volume, FileId NTFS)` + chemin de secours, pour
 survivre aux renommages/déplacements sur le même volume (Files stocke `FileFRN`, observé).
@@ -820,8 +821,12 @@ télémétrie distante.
   recherche par frappe ; Ctrl + molette (et Ctrl + Plus/Moins)
   pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **double volet** ; volet d'aperçu
   (texte et code colorés, markdown, grande miniature, infos).
-- **Opérations** : `IFileOperation` avec progression (centre d'état dans la barre d'état,
-  annulation), copier / couper / coller interopérables avec l'Explorateur (`CF_HDROP`),
+- **Opérations** : `IFileOperation` avec progression (centre d'état : bouton de la barre de
+  navigation à côté de Rechercher et de la palette, menu déroulant avec les opérations en
+  cours — progression, annulation — puis l'historique des opérations terminées, borné à
+  100 entrées sans liste de chemins, enregistré dans `folder.db` (conservé entre les
+  lancements, commun à toutes les fenêtres), effaçable ; anneau de progression sur le bouton et
+  pastille rouge pour un échec pas encore vu), copier / couper / coller interopérables avec l'Explorateur (`CF_HDROP`),
   renommage en place (F2, ou clic lent sur l'élément déjà sélectionné comme dans
   l'Explorateur, champ aligné sur le nom), renommage en masse (motif + aperçu), corbeille / suppression
   définitive, nouveau dossier / fichier, **annuler / rétablir**, compression et extraction

@@ -7,7 +7,7 @@ use fx_core::{CancelToken, DirSnapshot, SortDir, SortKey};
 use fx_fs::EnumOptions;
 use fx_store::{Layout, Session};
 
-use crate::effect::{Effect, Target};
+use crate::effect::{Effect, Persist, Target};
 use crate::history::{History, Location};
 use crate::state::{AppState, Column, ListingStatus, Pane, PaneId, PreviewState, path_of};
 
@@ -25,6 +25,7 @@ pub fn startup(
         Effect::LoadRecent,
         Effect::LoadWsl,
         Effect::CheckClipboard,
+        Effect::Persist(Persist::LoadOps),
     ];
     if state.settings.win_e_opens_folder {
         fx.push(Effect::EnsureWinE);

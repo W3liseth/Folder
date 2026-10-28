@@ -12,7 +12,7 @@ use fx_win::sys::KnownFolder;
 
 use crate::effect::{Effect, Persist};
 use crate::history::Location;
-use crate::ops::{OpStatus, UndoEntry};
+use crate::ops::{OpRecord, OpStatus, UndoEntry};
 use crate::state::{AppState, ListingStatus, Pane, PaneId, Renaming, ToastKind};
 use crate::update::{nav, persist_settings};
 
@@ -543,20 +543,21 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
         }
         _ => {}
     }
-    // Les opérations terminées sans erreur quittent le centre d'opérations après un moment
-    // (l'UI les estompe) ; on ne garde que les 20 dernières.
-    let finished: Vec<u64> = state
-        .ops
-        .iter()
-        .filter(|o| !o.is_running())
-        .map(|o| o.id)
-        .collect();
-    if finished.len() > 20 {
-        let drop: Vec<u64> = finished[..finished.len() - 20].to_vec();
-        state.ops.retain(|o| !drop.contains(&o.id));
+    // L'opération passe dans l'historique du centre d'état ; ses listes de chemins (déjà
+    // copiées dans l'entrée d'annulation) sont libérées.
+    let mut fx = Vec::new();
+    if let Some(i) = state.ops.iter().position(|o| o.id == op) {
+        let o = state.ops.remove(i);
+        let ended = state.op_history.next_end(fx_win::time::now_filetime());
+        let record = OpRecord::of(&o, ended);
+        fx.push(Effect::Persist(Persist::AddOp(record.entry())));
+        state.op_history.push(record);
+        if state.show_status_center {
+            state.op_history.mark_seen();
+        }
     }
     // Toute opération peut avoir changé la corbeille (mise à la corbeille, restauration…).
-    let mut fx = reload_recycle_bins(state);
+    fx.extend(reload_recycle_bins(state));
     fx.push(Effect::CheckClipboard);
     fx
 }

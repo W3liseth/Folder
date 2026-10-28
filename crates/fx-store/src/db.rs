@@ -1,4 +1,5 @@
-//! Base SQLite : étiquettes et préférences d'affichage par dossier.
+//! Base SQLite : étiquettes, préférences d'affichage par dossier et historique des
+//! opérations (centre d'état), partagés par toutes les fenêtres (un processus chacune).
 //!
 //! Les étiquettes sont indexées par chemin. Les renommages et déplacements faits par fx
 //! mettent la base à jour (`move_path`) ; ceux faits hors de fx perdent l'étiquette
@@ -30,6 +31,29 @@ pub struct FolderPrefs {
     pub sort_desc: bool,
 }
 
+/// Issue d'une opération terminée.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpOutcome {
+    Done,
+    Cancelled,
+    Failed(String),
+}
+
+/// Opération terminée, dans l'historique du centre d'état. Identifiée par `(ended, title)` :
+/// les identifiants d'opération sont propres à chaque processus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpEntry {
+    /// Fin de l'opération (FILETIME UTC).
+    pub ended: i64,
+    pub title: String,
+    pub items: u32,
+    pub outcome: OpOutcome,
+    pub duration_ms: u64,
+}
+
+/// Opérations gardées dans l'historique (les plus récentes).
+pub const MAX_OP_HISTORY: usize = 100;
+
 pub struct Db {
     conn: Connection,
 }
@@ -38,6 +62,8 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS tagged (path TEXT NOT NULL COLLATE NOCASE, tag INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY (path, tag));
 CREATE TABLE IF NOT EXISTS folder_prefs (path TEXT PRIMARY KEY COLLATE NOCASE, layout TEXT NOT NULL, sort_key INTEGER NOT NULL, sort_desc INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS op_history (id INTEGER PRIMARY KEY, ended INTEGER NOT NULL, title TEXT NOT NULL, items INTEGER NOT NULL, outcome TEXT NOT NULL, error TEXT, duration_ms INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS op_history_ended ON op_history (ended);
 ";
 
 /// Étiquettes proposées au premier lancement (comme Files).
@@ -136,6 +162,73 @@ impl Db {
             .map(drop)
     }
 
+    /// Historique des opérations, du plus récent au plus ancien.
+    pub fn op_history(&self) -> rusqlite::Result<Vec<OpEntry>> {
+        let mut st = self.conn.prepare(
+            "SELECT ended, title, items, outcome, error, duration_ms FROM op_history
+             ORDER BY ended DESC, id DESC LIMIT ?1",
+        )?;
+        st.query_map(params![MAX_OP_HISTORY as i64], |r| {
+            let outcome: String = r.get(3)?;
+            Ok(OpEntry {
+                ended: r.get(0)?,
+                title: r.get(1)?,
+                items: r.get(2)?,
+                outcome: match outcome.as_str() {
+                    "cancelled" => OpOutcome::Cancelled,
+                    "failed" => {
+                        OpOutcome::Failed(r.get::<_, Option<String>>(4)?.unwrap_or_default())
+                    }
+                    _ => OpOutcome::Done,
+                },
+                duration_ms: r.get::<_, i64>(5)?.max(0) as u64,
+            })
+        })?
+        .collect()
+    }
+
+    /// Ajoute une opération terminée ; au-delà de [`MAX_OP_HISTORY`], les plus anciennes
+    /// sont retirées.
+    pub fn add_op(&self, e: &OpEntry) -> rusqlite::Result<()> {
+        let (outcome, error) = match &e.outcome {
+            OpOutcome::Done => ("done", None),
+            OpOutcome::Cancelled => ("cancelled", None),
+            OpOutcome::Failed(err) => ("failed", Some(err.as_str())),
+        };
+        self.conn.execute(
+            "INSERT INTO op_history (ended, title, items, outcome, error, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                e.ended,
+                e.title,
+                e.items,
+                outcome,
+                error,
+                e.duration_ms.min(i64::MAX as u64) as i64
+            ],
+        )?;
+        self.conn
+            .execute(
+                "DELETE FROM op_history WHERE id NOT IN
+                 (SELECT id FROM op_history ORDER BY ended DESC, id DESC LIMIT ?1)",
+                params![MAX_OP_HISTORY as i64],
+            )
+            .map(drop)
+    }
+
+    pub fn remove_op(&self, ended: i64, title: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM op_history WHERE ended = ?1 AND title = ?2",
+                params![ended, title],
+            )
+            .map(drop)
+    }
+
+    pub fn clear_ops(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM op_history", []).map(drop)
+    }
+
     /// Toutes les associations chemin → étiquette (chargées en mémoire au démarrage).
     pub fn tagged(&self) -> rusqlite::Result<Vec<(PathBuf, TagId)>> {
         let mut st = self.conn.prepare("SELECT path, tag FROM tagged")?;
@@ -228,6 +321,47 @@ fn escape_like(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn op_history_is_bounded_newest_first_and_clearable() {
+        let db = Db::in_memory().expect("db");
+        let entry = |ended: i64, outcome| OpEntry {
+            ended,
+            title: format!("op {ended}"),
+            items: 2,
+            outcome,
+            duration_ms: 1500,
+        };
+        db.add_op(&entry(1, OpOutcome::Failed("Accès refusé.".into())))
+            .expect("add");
+        db.add_op(&entry(2, OpOutcome::Cancelled)).expect("add");
+        let h = db.op_history().expect("history");
+        assert_eq!(
+            h,
+            vec![
+                entry(2, OpOutcome::Cancelled),
+                entry(1, OpOutcome::Failed("Accès refusé.".into()))
+            ]
+        );
+        db.remove_op(2, "op 2").expect("remove");
+        assert_eq!(db.op_history().expect("history").len(), 1);
+        for ended in 10..(10 + MAX_OP_HISTORY as i64 + 5) {
+            db.add_op(&entry(ended, OpOutcome::Done)).expect("add");
+        }
+        let h = db.op_history().expect("history");
+        assert_eq!(h.len(), MAX_OP_HISTORY);
+        assert_eq!(h[0].ended, 10 + MAX_OP_HISTORY as i64 + 4);
+        let rows: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM op_history", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(
+            rows, MAX_OP_HISTORY as i64,
+            "les plus anciennes sont retirées"
+        );
+        db.clear_ops().expect("clear");
+        assert!(db.op_history().expect("history").is_empty());
+    }
 
     #[test]
     fn default_tags_and_crud() {
