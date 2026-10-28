@@ -31,7 +31,8 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, maximized: bool) {
         .frame(Frame::new().fill(pal.base))
         .show(ui, |ui| {
             let full = ui.max_rect();
-            let buttons_w = BUTTON_W * 3.0;
+            let update_w = update_button(ui, f, full);
+            let buttons_w = BUTTON_W * 3.0 + update_w;
             let tabs_area = Rect::from_min_max(
                 pos2(full.left() + 8.0, full.top() + 6.0),
                 pos2(full.right() - buttons_w - 46.0, full.bottom()),
@@ -531,6 +532,67 @@ fn follow_pointer(ctx: &egui::Context, f: &mut Fx<'_>, area: Rect, grab: Vec2, o
         fx_win::window::move_to(hwnd, x, y);
     }
     ctx.request_repaint();
+}
+
+/// « Mettre à jour », à gauche des boutons de la fenêtre, quand une nouvelle version est
+/// téléchargée (cf. `fx_app::upgrade`) ; renvoie la largeur occupée (0 sans mise à jour).
+fn update_button(ui: &mut Ui, f: &mut Fx<'_>, full: Rect) -> f32 {
+    let Some(version) = f.state.update.ready_version() else {
+        return 0.0;
+    };
+    let pal = f.pal;
+    let label = "Mettre à jour";
+    let font = FontId::proportional(12.5);
+    let text_w = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE)
+        .size()
+        .x;
+    let w = 12.0 + 14.0 + 6.0 + text_w + 12.0;
+    let rect = Rect::from_min_size(
+        pos2(
+            full.right() - BUTTON_W * 3.0 - 8.0 - w,
+            full.center().y + 3.0 - 13.0,
+        ),
+        vec2(w, 26.0),
+    );
+    let r = ui.interact(rect, Id::unique("update-ready"), Sense::click());
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(r.id.with("h"), r.hovered(), 0.12);
+    let fill = if r.is_pointer_button_down_on() {
+        crate::theme::mix(pal.accent, Color32::BLACK, 0.12)
+    } else {
+        crate::theme::mix(pal.accent, Color32::WHITE, 0.10 * hover)
+    };
+    ui.painter().rect_filled(rect, 13.0, fill);
+    let on = if pal.dark {
+        pal.on_accent
+    } else {
+        Color32::WHITE
+    };
+    ui.painter().text(
+        pos2(rect.left() + 12.0 + 7.0, rect.center().y),
+        Align2::CENTER_CENTER,
+        glyph::DOWNLOAD,
+        icon_font(12.0),
+        on,
+    );
+    ui.painter().text(
+        pos2(rect.left() + 12.0 + 14.0 + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        font,
+        on,
+    );
+    if r.on_hover_text(format!(
+        "folder {version} est prêt : l'installer et redémarrer folder (onglets conservés)"
+    ))
+    .clicked()
+    {
+        f.send(Msg::InstallUpdate);
+    }
+    w + 8.0
 }
 
 fn window_buttons(ui: &mut Ui, f: &mut Fx<'_>, full: Rect, maximized: bool) {

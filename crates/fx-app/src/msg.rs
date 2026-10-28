@@ -12,6 +12,7 @@ use fx_win::sys::{Drive, KnownFolder};
 
 use crate::history::Location;
 use crate::state::{PaneId, RecentItem};
+use crate::upgrade::Status;
 
 /// Tout ce qui peut modifier l'état : entrées utilisateur et résultats des workers.
 #[derive(Debug)]
@@ -217,5 +218,23 @@ pub enum Msg {
         done: bool,
     },
     WslLoaded(Vec<String>),
+
+    // --- Mise à jour (cf. `upgrade`) ---
+    /// Recherche une nouvelle version ; `force` (demande explicite) ignore le résultat du
+    /// jour et annonce le résultat, quel qu'il soit.
+    CheckUpdate {
+        force: bool,
+    },
+    /// Résultat ; `fresh` : vérifié en ligne (sinon lu dans le fichier partagé).
+    UpdateChecked {
+        status: Status,
+        fresh: bool,
+        force: bool,
+    },
+    /// Installe la mise à jour prête (l'installeur ferme puis relance folder).
+    InstallUpdate,
+    /// L'installeur est lancé : la fenêtre se ferme en enregistrant sa session.
+    UpdateLaunched,
+
     Error(String),
 }

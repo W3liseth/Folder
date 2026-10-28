@@ -33,6 +33,9 @@ pub enum Remote {
         back: Vec<PathBuf>,
         forward: Vec<PathBuf>,
     },
+    /// Installer la mise à jour téléchargée : la fenêtre principale lance l'installeur et se
+    /// ferme en enregistrant sa session.
+    InstallUpdate,
 }
 
 impl Remote {
@@ -48,6 +51,7 @@ impl Remote {
                 format!("H{}\n{}", numbers(at, grab), path.display())
             }
             Self::TabHoverEnd => "E".to_owned(),
+            Self::InstallUpdate => "U".to_owned(),
             // Une ligne par chemin (un chemin Windows ne contient pas de saut de ligne) :
             // positions, emplacement, puis l'historique préfixé par `<` ou `>`.
             Self::TabDrop {
@@ -98,6 +102,7 @@ impl Remote {
                 })
             }
             "E" => rest.is_empty().then_some(Self::TabHoverEnd),
+            "U" => rest.is_empty().then_some(Self::InstallUpdate),
             "A" => {
                 let mut lines = rest.split('\n');
                 let (at, grab) = parse_numbers(lines.next()?)?;
@@ -165,6 +170,7 @@ mod tests {
                 path: r"C:\Users\moi\Documents".into(),
             },
             Remote::TabHoverEnd,
+            Remote::InstallUpdate,
             Remote::TabDrop {
                 at: [640, 22],
                 grab: [10, 3],

@@ -5,6 +5,7 @@ mod commands;
 mod edit;
 mod nav;
 mod results;
+pub(crate) mod upgrade;
 
 use fx_core::{SortDir, SortKey, SortSpec};
 use fx_store::FolderPrefs;
@@ -164,6 +165,20 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
         }
 
         Msg::UpdateSettings(s) => edit::update_settings(state, *s),
+        Msg::CheckUpdate { force } => upgrade::check(state, force),
+        Msg::UpdateChecked {
+            status,
+            fresh,
+            force,
+        } => {
+            upgrade::checked(state, status, fresh, force);
+            vec![]
+        }
+        Msg::InstallUpdate => upgrade::install(state),
+        Msg::UpdateLaunched => {
+            state.requests.close_window = true;
+            vec![]
+        }
         Msg::SetTag { paths, tag, on } => edit::set_tag(state, paths, tag, on),
         Msg::SaveTag(tag) => {
             if tag.id != 0

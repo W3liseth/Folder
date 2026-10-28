@@ -31,6 +31,17 @@ pub use bench::BenchMode;
 /// Workers d'I/O : l'énumération est limitée par le disque, pas par le CPU.
 const IO_THREADS: usize = 2;
 
+/// Intervalle entre deux vérifications de mise à jour d'une fenêtre restée ouverte.
+const UPDATE_INTERVAL: Duration = Duration::from_secs(6 * 3600);
+
+/// Corps du processus `folder.exe --update-check` (cf. `fx_app::upgrade`) : vérifie en
+/// ligne, télécharge si besoin, et renvoie la ligne de réponse à écrire sur stdout.
+pub fn update_check() -> String {
+    fx_app::upgrade::check_process(&Paths::standard())
+}
+
+pub use fx_app::upgrade::CHECK_ARG as UPDATE_CHECK_ARG;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Renderer {
     Cpu,
@@ -206,6 +217,8 @@ struct Core {
     placement: Option<fx_store::WindowPlacement>,
     /// La fenêtre, créée cachée, a été placée et affichée.
     shown: bool,
+    /// Dernière vérification de mise à jour demandée ; `None` : jamais (mode mesure).
+    last_update_check: Option<Instant>,
 }
 
 impl Core {
@@ -285,6 +298,7 @@ impl Core {
             shown: false,
             remote: crossbeam_channel::unbounded(),
             listening: false,
+            last_update_check: (opts.bench == BenchMode::Off).then(Instant::now),
         };
         // En mode mesure, pas de restauration de session : on ouvre le dossier demandé.
         let session = if opts.bench == BenchMode::Off {
@@ -296,6 +310,10 @@ impl Core {
             start: opts.start_dir.clone(),
             session,
         });
+        // Pas de mise à jour en mode mesure : aucun processus ni thread en plus.
+        if core.last_update_check.is_some() && core.state.settings.auto_update {
+            core.apply(Msg::CheckUpdate { force: false });
+        }
         Ok(core)
     }
 
@@ -357,6 +375,16 @@ impl Core {
                 .dispatch(fx_app::Effect::Persist(fx_app::effect::Persist::Session(
                     self.session(),
                 )));
+        }
+        // Fenêtre restée ouverte longtemps : nouvelle vérification (une requête par jour au
+        // plus, cf. `fx_app::upgrade::check`). Seulement à l'occasion d'une image : aucun
+        // réveil n'est programmé pour cela.
+        if self.state.settings.auto_update
+            && let Some(t) = &mut self.last_update_check
+            && t.elapsed() > UPDATE_INTERVAL
+        {
+            *t = Instant::now();
+            self.apply(Msg::CheckUpdate { force: false });
         }
         if let Some(b) = &mut self.bench {
             b.after_frame(ui.ctx(), &self.state, &mut self.view, last_frame);
@@ -432,6 +460,7 @@ impl Core {
                 Msg::UpdateSettings(s)
             }
             fx_store::remote::Remote::SaveTag(t) => Msg::SaveTag(t),
+            fx_store::remote::Remote::InstallUpdate => Msg::InstallUpdate,
             fx_store::remote::Remote::DeleteTag(id) => Msg::DeleteTag(id),
             fx_store::remote::Remote::TabHover { .. }
             | fx_store::remote::Remote::TabHoverEnd

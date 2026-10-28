@@ -403,7 +403,10 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             edit::update_settings(state, s)
         }
 
-        Settings => vec![Effect::SettingsWindow],
+        Settings => vec![Effect::SettingsWindow { notes: false }],
+        ReleaseNotes => vec![Effect::SettingsWindow { notes: true }],
+        CheckForUpdates => super::upgrade::check(state, true),
+        InstallUpdate => super::upgrade::install(state),
         ToggleTheme => {
             state.settings.theme = match state.settings.theme {
                 ThemeChoice::Dark => ThemeChoice::Light,

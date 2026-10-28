@@ -43,6 +43,12 @@ fn main() -> ExitCode {
         };
     }
 
+    // Recherche de mise à jour (lancée par une fenêtre folder) : réponse sur stdout.
+    if raw_os.first().is_some_and(|a| a == fx_ui::UPDATE_CHECK_ARG) {
+        println!("{}", fx_ui::update_check());
+        return ExitCode::SUCCESS;
+    }
+
     // Mise à jour (installeur) : processus résident arrêté, option inchangée ; relancé ensuite.
     if raw_os.first().is_some_and(|a| a == "--stop-win-e") {
         fx_ui::stop_win_e();
@@ -64,7 +70,8 @@ fn main() -> ExitCode {
             .position(|a| a == "--owner")
             .and_then(|i| raw.get(i + 1))
             .and_then(|v| v.parse().ok());
-        return match fx_ui::settings_window::run(owner) {
+        let notes = raw.iter().any(|a| a == "--notes");
+        return match fx_ui::settings_window::run(owner, notes) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("folder : {e}");

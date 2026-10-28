@@ -2,7 +2,9 @@
 //!
 //! - `settings.toml` (dans `%APPDATA%\folder`) : réglages et raccourcis personnalisés ;
 //! - `session.toml` (dans `%LOCALAPPDATA%\folder`) : onglets ouverts ;
-//! - `folder.db` (SQLite, `%LOCALAPPDATA%\folder`) : étiquettes et préférences d'affichage par dossier.
+//! - `folder.db` (SQLite, `%LOCALAPPDATA%\folder`) : étiquettes et préférences d'affichage par dossier ;
+//! - `update.toml` et `updates\` (`%LOCALAPPDATA%\folder`) : dernière vérification de mise à
+//!   jour, installeur téléchargé.
 //!
 //! Les écritures sont faites par le thread de persistance de `fx-app`, jamais par l'UI.
 //! Les écritures de fichiers sont atomiques (fichier temporaire puis renommage).
@@ -82,6 +84,36 @@ impl Paths {
     pub(crate) fn db(&self) -> PathBuf {
         self.local.join(DB)
     }
+
+    fn update(&self) -> PathBuf {
+        self.local.join("update.toml")
+    }
+
+    /// Installeurs téléchargés par la mise à jour automatique.
+    pub fn updates_dir(&self) -> PathBuf {
+        self.local.join("updates")
+    }
+}
+
+/// Résultat de la dernière vérification de mise à jour, partagé par toutes les fenêtres
+/// (une par processus) : une seule requête réseau par jour, quel que soit leur nombre.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct UpdateState {
+    /// Heure de la vérification (secondes depuis 1970, UTC).
+    pub checked: i64,
+    /// Dernière version publiée (sans le `v` du tag).
+    pub latest: String,
+    /// Installeur de `latest`, téléchargé et vérifié, si elle est plus récente.
+    pub installer: Option<PathBuf>,
+}
+
+pub fn load_update(paths: &Paths) -> Option<UpdateState> {
+    load_toml(&paths.update())
+}
+
+pub fn save_update(paths: &Paths, s: &UpdateState) -> io::Result<()> {
+    save_toml(&paths.update(), s)
 }
 
 pub fn load_settings(paths: &Paths) -> Settings {
@@ -191,6 +223,21 @@ mod tests {
         };
         save_session(&paths, &s).expect("save");
         assert_eq!(load_session(&paths), Some(s));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_state_roundtrip() {
+        let dir = tmp("update");
+        let paths = Paths::in_dir(&dir);
+        assert_eq!(load_update(&paths), None);
+        let s = UpdateState {
+            checked: 1_793_000_000,
+            latest: "0.6.0".into(),
+            installer: Some(paths.updates_dir().join("folder-setup-0.6.0-x64.exe")),
+        };
+        save_update(&paths, &s).expect("save");
+        assert_eq!(load_update(&paths), Some(s));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

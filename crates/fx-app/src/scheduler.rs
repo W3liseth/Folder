@@ -466,7 +466,7 @@ impl Scheduler {
             Effect::LoadWsl => self.io(move || {
                 out.send(Msg::WslLoaded(fx_win::sys::wsl_distributions()));
             }),
-            Effect::SettingsWindow => {
+            Effect::SettingsWindow { notes } => {
                 let owner = self.owner.load(Ordering::Relaxed);
                 self.io(move || {
                     if fx_win::window::focus_title(crate::SETTINGS_TITLE) {
@@ -480,12 +480,35 @@ impl Scheduler {
                         }
                     };
                     cmd.arg("--settings");
+                    if notes {
+                        cmd.arg("--notes");
+                    }
                     if owner != 0 {
                         cmd.args(["--owner", &owner.to_string()]);
                     }
                     if let Err(e) = cmd.spawn() {
                         out.send(Msg::Error(format!("Paramètres indisponibles : {e}")));
                     }
+                });
+            }
+            Effect::CheckUpdate { force, delay } => {
+                // Thread temporaire : le processus de vérification peut télécharger
+                // l'installeur (plusieurs secondes), sans occuper le pool I/O.
+                let paths = self.paths.clone();
+                spawn_temp("fx-update", move || {
+                    let (status, fresh) = crate::upgrade::check(&paths, force, delay);
+                    out.send(Msg::UpdateChecked {
+                        status,
+                        fresh,
+                        force,
+                    });
+                });
+            }
+            Effect::InstallUpdate => {
+                let paths = self.paths.clone();
+                self.io(move || match crate::upgrade::install(&paths) {
+                    Ok(()) => out.send(Msg::UpdateLaunched),
+                    Err(e) => out.send(Msg::Error(format!("Mise à jour impossible : {e}"))),
                 });
             }
             Effect::PropertiesWindow { paths, recycled } => {

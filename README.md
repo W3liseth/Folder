@@ -33,7 +33,10 @@ WebView ni runtime .NET.
   - la corbeille et les partages réseau.
   - Photos parcourt les images dans l'ordre de tri de folder.
 - **Recherche** : un filtre instantané et une recherche récursive diffusée au fil de l'eau.
-- **Commandes** : 64 commandes avec raccourcis configurables, une palette (`Ctrl+Maj+P`) et
+- **Mises à jour** : folder vérifie chaque jour s'il existe une nouvelle version, la
+  télécharge, puis l'installe quand tu cliques sur « Mettre à jour » (onglets conservés).
+  Les notes de chaque version sont dans Paramètres › Mises à jour.
+- **Commandes** : 68 commandes avec raccourcis configurables, une palette (`Ctrl+Maj+P`) et
   une barre d'outils qui s'adapte à la largeur de la fenêtre.
 - **Apparence** : thème clair ou sombre suivant Windows, couleur d'accent libre, animations
   courtes, cadre natif (coins arrondis, ombre).
@@ -104,12 +107,16 @@ sont décrits dans [CLAUDE.md](CLAUDE.md).
 
 La version de folder est celle de `[workspace.package]` dans [Cargo.toml](Cargo.toml).
 
-1. Change la version, par exemple `version = "0.5.2"`.
-2. Pousse le commit sur `main`.
+1. Change la version, par exemple `version = "0.6.0"`.
+2. Ajoute en tête de [CHANGELOG.md](CHANGELOG.md) une section `## 0.6.0 — <date>` avec la
+   liste des changements (`cargo test` échoue sans elle).
+3. Pousse le commit sur `main`.
 
 Le workflow [Installeur](.github/workflows/installer.yml) construit alors l'installeur et
-crée la release `v0.5.2`, avec le tag sur ce commit et les notes générées à partir des
-changements. Une version avec suffixe, comme `0.5.2-beta.1`, est publiée en préversion.
+crée la release `v0.6.0`, avec le tag sur ce commit et, pour description, la section de
+CHANGELOG.md. Ces notes sont aussi affichées dans folder (Paramètres › Mises à jour), et les
+folder installés proposent la nouvelle version dans la journée. Une version avec suffixe,
+comme `0.6.0-beta.1`, est publiée en préversion, et n'est pas proposée en mise à jour.
 Si la release existe déjà, rien n'est publié. Lancé à la main depuis l'onglet Actions, le
 workflow crée la release qui manque, ou construit seulement l'installeur.
 
@@ -117,7 +124,7 @@ Pour construire l'installeur en local, installe [Inno Setup 6](https://jrsoftwar
 puis lance :
 
 ```bash
-iscc /DAppVersion=0.5.2 installer/folder.iss
+iscc /DAppVersion=0.6.0 installer/folder.iss
 ```
 
 L'installeur est écrit dans `target\installer`.
@@ -156,12 +163,24 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 
 ### Confidentialité (privacy policy)
 
-This program will not transfer any information to other networked systems unless
-specifically requested by the user or the person installing or operating it.
+This program checks for updates. When the "Check for updates automatically" option is on
+(the default; Settings › Updates), it requests, at most once a day, the latest release of
+this repository from github.com and, if a newer version exists, downloads its installer
+from GitHub. These requests carry no information about the user or their files, only what
+any HTTPS request carries (IP address, user agent `folder/<version>`); GitHub's privacy
+statement applies to them. The update is installed only when the user asks for it. Apart
+from this, this program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or operating it.
 
-folder n'envoie aucune donnée sur le réseau : ni télémétrie, ni vérification de mise à jour.
-Il n'accède au réseau que lorsque tu ouvres toi-même un emplacement réseau (partages,
-ordinateurs du réseau local) ou un fichier qui s'y trouve.
+folder n'envoie aucune télémétrie. Sa seule requête automatique est la vérification de mise
+à jour : si l'option « Rechercher automatiquement les mises à jour » est active (c'est le
+cas par défaut, Paramètres › Mises à jour), il demande au plus une fois par jour à
+github.com la dernière version publiée et, si elle est plus récente, en télécharge
+l'installeur. Ces requêtes ne contiennent rien sur toi ni sur tes fichiers (seulement ce que
+porte toute requête HTTPS : adresse IP, agent `folder/<version>`). L'installation n'a lieu
+que lorsque tu la demandes. Sinon, folder n'accède au réseau que lorsque tu ouvres toi-même
+un emplacement réseau (partages, ordinateurs du réseau local) ou un fichier qui s'y
+trouve.
 
 ## Licence
 

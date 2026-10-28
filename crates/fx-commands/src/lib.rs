@@ -30,6 +30,8 @@ pub struct CommandContext {
     /// Sélection d'une archive .zip.
     pub zip_selected: bool,
     pub in_recycle_bin: bool,
+    /// Une mise à jour est téléchargée et prête à être installée.
+    pub update_ready: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,6 +158,9 @@ commands! {
     ToggleTheme => Application, "Basculer clair / sombre", "\u{E793}", [];
     FullScreen => Application, "Plein écran", "\u{E740}", ["F11"];
     Diagnostics => Application, "Diagnostics", "\u{E9D9}", ["F12"];
+    CheckForUpdates => Application, "Rechercher les mises à jour", "\u{E895}", [];
+    InstallUpdate => Application, "Installer la mise à jour", "\u{E896}", [];
+    ReleaseNotes => Application, "Notes de version", "\u{E7BC}", [];
 }
 
 impl CommandId {
@@ -193,6 +198,7 @@ impl CommandId {
             Undo => c.can_undo,
             Redo => c.can_redo,
             EmptyRecycleBin => true,
+            InstallUpdate => c.update_ready,
             _ => true,
         }
     }

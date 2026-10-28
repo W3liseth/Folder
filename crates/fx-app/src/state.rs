@@ -357,6 +357,8 @@ pub struct UiRequests {
     pub focus_path: bool,
     pub shell_menu: bool,
     pub toggle_fullscreen: bool,
+    /// Fermer la fenêtre (installeur de mise à jour lancé).
+    pub close_window: bool,
 }
 
 pub struct AppState {
@@ -383,6 +385,8 @@ pub struct AppState {
     /// Fenêtre de recherche (bouton Rechercher, Ctrl+F).
     pub show_search: bool,
     pub show_diagnostics: bool,
+    /// Mise à jour : dernière vérification connue, installeur prêt.
+    pub update: crate::upgrade::Status,
     pub requests: UiRequests,
     pub(crate) next_id: u64,
     /// Chemin d'un élément tout juste créé, à renommer dès qu'il apparaît dans la liste.
@@ -419,6 +423,7 @@ impl AppState {
             show_palette: false,
             show_search: false,
             show_diagnostics: false,
+            update: crate::upgrade::Status::Unknown,
             requests: UiRequests::default(),
             next_id: 1,
             pending_rename: None,
@@ -536,6 +541,7 @@ impl AppState {
                 .iter()
                 .any(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))),
             in_recycle_bin: matches!(pane.location(), Location::RecycleBin),
+            update_ready: self.update.ready_version().is_some(),
         }
     }
 

@@ -320,6 +320,10 @@ pub fn update_settings(state: &mut AppState, new: Settings) -> Vec<Effect> {
     if !old.show_preview && state.settings.show_preview {
         fx.extend(nav::after_selection(state));
     }
+    // Vérification automatique tout juste activée : une première vérification.
+    if !old.auto_update && state.settings.auto_update {
+        fx.extend(crate::update::upgrade::check(state, false));
+    }
     fx
 }
 

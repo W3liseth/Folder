@@ -1,11 +1,13 @@
 //! Page Paramètres (dans sa propre fenêtre, cf. `settings_window`) : général, apparence,
-//! dossiers, étiquettes, raccourcis, à propos. Chaque modification est envoyée à la fenêtre
-//! principale, qui l'applique et l'enregistre aussitôt.
+//! dossiers, étiquettes, raccourcis, mises à jour (et notes de version), à propos. Chaque
+//! modification est envoyée à la fenêtre principale, qui l'applique et l'enregistre
+//! aussitôt.
 
 use eframe::egui::{
     self, Align, Align2, Color32, Frame, Id, Layout, RichText, ScrollArea, Sense, Ui, pos2, vec2,
 };
 use fx_app::Msg;
+use fx_app::upgrade::{Release, Status};
 use fx_commands::{CommandId, Group};
 use fx_store::{Layout as View, Settings, Tag, ThemeChoice};
 
@@ -13,14 +15,18 @@ use super::Fx;
 use crate::theme::{glyph, icon_font, semibold};
 use crate::widgets;
 
-const SECTIONS: [(&str, &str); 6] = [
+const SECTIONS: [(&str, &str); 7] = [
     (glyph::SETTINGS, "Général"),
     (glyph::PALETTE, "Apparence"),
     (glyph::FOLDER, "Dossiers"),
     (glyph::TAG, "Étiquettes"),
     (glyph::KEYBOARD, "Raccourcis"),
+    (glyph::SYNC, "Mises à jour"),
     (glyph::INFO, "À propos"),
 ];
+
+/// Section des mises à jour (et des notes de version).
+pub(crate) const UPDATES: usize = 5;
 
 /// Page Paramètres dans la fenêtre courante (fenêtre Paramètres à part entière) :
 /// navigation à gauche, section choisie à droite.
@@ -75,6 +81,7 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
                 );
                 if r.clicked() {
                     f.vs.settings_section = i;
+                    f.vs.settings_notes = false;
                 }
             }
         });
@@ -85,7 +92,12 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
                 .inner_margin(egui::Margin::symmetric(28, 20)),
         )
         .show(ui, |ui| {
-            ui.label(RichText::new(SECTIONS[f.vs.settings_section].1).font(semibold(26.0)));
+            let title = if f.vs.settings_section == UPDATES && f.vs.settings_notes {
+                "Notes de version"
+            } else {
+                SECTIONS[f.vs.settings_section].1
+            };
+            ui.label(RichText::new(title).font(semibold(26.0)));
             ui.add_space(14.0);
             ScrollArea::vertical()
                 .id_salt("settings-scroll")
@@ -100,6 +112,8 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
                         2 => folders(ui, f, &mut s),
                         3 => tags(ui, f, &mut s),
                         4 => shortcuts(ui, f, &mut s),
+                        UPDATES if f.vs.settings_notes => release_notes(ui, f),
+                        UPDATES => updates(ui, f, &mut s),
                         _ => about(ui, f),
                     }
                     if s != before {
@@ -628,6 +642,221 @@ fn system_shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
 
 fn group_label(g: Group) -> &'static str {
     g.label()
+}
+
+/// État de la mise à jour, recherche à la demande, réglage automatique, notes de version.
+fn updates(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    let pal = f.pal;
+    let status = &f.state.update;
+    let (glyph_, color, line) = match status {
+        Status::Ready { version, .. } => (
+            glyph::DOWNLOAD,
+            pal.accent,
+            format!("folder {version} est téléchargé et prêt à être installé."),
+        ),
+        Status::UpToDate { checked, .. } => (
+            glyph::SUCCESS,
+            pal.success,
+            format!(
+                "folder est à jour. Dernière vérification : {}.",
+                since(*checked)
+            ),
+        ),
+        Status::Checking => (glyph::SYNC, pal.text2, "Recherche en cours…".to_owned()),
+        Status::Failed(e) => (
+            glyph::WARNING,
+            pal.warning,
+            format!("La dernière recherche a échoué : {e}."),
+        ),
+        Status::NotInstalled => (
+            glyph::INFO,
+            pal.text2,
+            "Indisponible : ce folder n'a pas été lancé depuis son installation (version de \
+             développement)."
+                .to_owned(),
+        ),
+        Status::Unknown => (
+            glyph::SYNC,
+            pal.text2,
+            "Aucune recherche récente.".to_owned(),
+        ),
+    };
+    Frame::new()
+        .fill(pal.layer)
+        .stroke(egui::Stroke::new(1.0, pal.stroke))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(glyph_).font(icon_font(22.0)).color(color));
+                ui.add_space(6.0);
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(format!("folder {}", env!("CARGO_PKG_VERSION")))
+                            .font(semibold(15.0)),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(line).size(12.0).color(pal.text2)).wrap(),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match status {
+                    Status::Ready { .. } => {
+                        if widgets::accent_button(
+                            ui,
+                            &pal,
+                            glyph::DOWNLOAD,
+                            "Installer et redémarrer",
+                            false,
+                        )
+                        .on_hover_text(
+                            "Ferme folder, installe la mise à jour, puis rouvre vos onglets",
+                        )
+                        .clicked()
+                        {
+                            f.send(Msg::InstallUpdate);
+                        }
+                    }
+                    Status::Checking => {
+                        ui.add(egui::Spinner::new().size(18.0));
+                    }
+                    Status::NotInstalled => {}
+                    _ => {
+                        if ui
+                            .add(
+                                egui::Button::new("Rechercher les mises à jour")
+                                    .min_size(vec2(0.0, 30.0)),
+                            )
+                            .clicked()
+                        {
+                            f.send(Msg::CheckUpdate { force: true });
+                        }
+                    }
+                });
+            });
+        });
+    ui.add_space(4.0);
+    setting(
+        ui,
+        f,
+        "Rechercher automatiquement les mises à jour",
+        "Au plus une fois par jour, sur GitHub ; l'installation reste à votre demande.",
+        |ui| toggle(ui, &mut s.auto_update),
+    );
+    let mut open_notes = false;
+    setting(
+        ui,
+        f,
+        "Notes de version",
+        "Les changements de chaque version de folder.",
+        |ui| {
+            open_notes = ui
+                .add(
+                    egui::Button::new(widgets::menu_entry(glyph::NOTES, "Notes de version", &pal))
+                        .min_size(vec2(0.0, 30.0)),
+                )
+                .clicked();
+        },
+    );
+    if open_notes {
+        f.vs.settings_notes = true;
+    }
+}
+
+/// Changements de chaque version (CHANGELOG.md embarqué), du plus récent au plus ancien.
+fn release_notes(ui: &mut Ui, f: &mut Fx<'_>) {
+    static NOTES: std::sync::OnceLock<Vec<Release>> = std::sync::OnceLock::new();
+    let pal = f.pal;
+    if ui
+        .add(egui::Button::new(widgets::menu_entry(glyph::BACK, "Mises à jour", &pal)).frame(false))
+        .clicked()
+    {
+        f.vs.settings_notes = false;
+    }
+    ui.add_space(8.0);
+    let current = env!("CARGO_PKG_VERSION");
+    for r in NOTES.get_or_init(fx_app::upgrade::notes) {
+        Frame::new()
+            .fill(pal.layer)
+            .stroke(egui::Stroke::new(1.0, pal.stroke))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(16, 12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Version {}", r.version)).font(semibold(16.0)));
+                    ui.label(RichText::new(long_date(r.date)).size(12.5).color(pal.text3));
+                    if r.version == current {
+                        ui.add_space(4.0);
+                        Frame::new()
+                            .fill(pal.accent.gamma_multiply(0.18))
+                            .corner_radius(9)
+                            .inner_margin(egui::Margin::symmetric(8, 2))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new("Version installée")
+                                        .size(11.5)
+                                        .color(pal.accent),
+                                );
+                            });
+                    }
+                });
+                ui.add_space(6.0);
+                for item in &r.items {
+                    ui.horizontal_top(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("•").color(pal.accent));
+                        ui.add(egui::Label::new(item.as_str()).wrap());
+                    });
+                    ui.add_space(2.0);
+                }
+            });
+        ui.add_space(8.0);
+    }
+}
+
+/// « 2026-10-28 » → « 28 octobre 2026 » (date des notes de version).
+fn long_date(iso: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "janvier",
+        "février",
+        "mars",
+        "avril",
+        "mai",
+        "juin",
+        "juillet",
+        "août",
+        "septembre",
+        "octobre",
+        "novembre",
+        "décembre",
+    ];
+    let mut it = iso.split('-').map(|p| p.parse::<usize>().ok());
+    match (it.next(), it.next(), it.next()) {
+        (Some(Some(y)), Some(Some(m)), Some(Some(d))) if (1..=12).contains(&m) => {
+            let day = if d == 1 {
+                "1er".to_owned()
+            } else {
+                d.to_string()
+            };
+            format!("{day} {} {y}", MONTHS[m - 1])
+        }
+        _ => iso.to_owned(),
+    }
+}
+
+/// Temps écoulé depuis `secs` (secondes depuis 1970), en clair.
+fn since(secs: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    match (now - secs).max(0) {
+        0..60 => "à l'instant".to_owned(),
+        s @ 60..3600 => format!("il y a {} min", s / 60),
+        s @ 3600..86_400 => format!("il y a {} h", s / 3600),
+        s if s < 2 * 86_400 => "hier".to_owned(),
+        s => format!("il y a {} jours", s / 86_400),
+    }
 }
 
 fn about(ui: &mut Ui, f: &mut Fx<'_>) {

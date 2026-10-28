@@ -1,7 +1,7 @@
 ; Installeur Windows de folder (Inno Setup 6).
 ;
 ; Construction locale (après `cargo build --release -p folder`) :
-;   iscc /DAppVersion=0.5.2 installer\folder.iss
+;   iscc /DAppVersion=0.6.0 installer\folder.iss
 ; Sortie : target\installer\folder-setup-<version>-x64.exe
 ; En CI : .github/workflows/installer.yml.
 ;
@@ -10,7 +10,7 @@
 ; l'utilisateur (%APPDATA%\folder, %LOCALAPPDATA%\folder) sont conservés à la désinstallation.
 
 #ifndef AppVersion
-  #define AppVersion "0.5.2"
+  #define AppVersion "0.6.0"
 #endif
 #define AppName "folder"
 #define AppExe "folder.exe"
@@ -79,6 +79,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; l'option est désactivée). Pour l'utilisateur, même depuis une installation élevée.
 Filename: "{app}\{#AppExe}"; Parameters: "--win-e"; Flags: nowait runasoriginaluser
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Mise à jour lancée par folder (mode silencieux, /RELAUNCH=1, cf. fx-app::upgrade) : folder,
+; qui s'est fermé, est rouvert et restaure ses onglets.
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WantRelaunch
 
 [UninstallRun]
 ; Windows + E rendu à l'Explorateur et raccourci clavier d'ouverture retiré (réglages
@@ -86,6 +89,12 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 Filename: "{app}\{#AppExe}"; Parameters: "--restore-explorer"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreExplorer"
 
 [Code]
+// Mise à jour automatique : folder lance l'installeur avec /RELAUNCH=1 puis se ferme.
+function WantRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 // Mise à jour : le processus résident de Windows + E (sans fenêtre, que le gestionnaire de
 // redémarrage ne sait pas fermer) est arrêté avant le remplacement de l'exécutable ; la
 // section [Run] le relance.

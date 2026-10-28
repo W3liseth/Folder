@@ -1020,3 +1020,84 @@ fn properties_open_a_separate_window() {
         "plus de fenêtre modale dans la fenêtre principale"
     );
 }
+
+#[test]
+fn update_check_install_and_close() {
+    use crate::upgrade::Status;
+    let mut s = state();
+    let ready = Status::Ready {
+        version: "9.0.0".into(),
+        installer: PathBuf::from(r"C:\u\folder-setup-9.0.0-x64.exe"),
+    };
+    assert!(!s.command_context().update_ready);
+
+    // Vérification automatique : différée, silencieuse.
+    let fx = update(&mut s, Msg::CheckUpdate { force: false });
+    assert!(matches!(
+        fx[..],
+        [Effect::CheckUpdate { force: false, delay }] if delay > Duration::ZERO
+    ));
+    assert_eq!(s.update, Status::Unknown);
+    assert!(s.toasts.is_empty());
+
+    // Version téléchargée : annoncée une fois, installable.
+    let checked = |s: &mut AppState, status: &Status, fresh, force| {
+        update(
+            s,
+            Msg::UpdateChecked {
+                status: status.clone(),
+                fresh,
+                force,
+            },
+        )
+    };
+    checked(&mut s, &ready, true, false);
+    assert_eq!(s.update, ready);
+    assert_eq!(s.toasts.len(), 1);
+    checked(&mut s, &ready, true, false);
+    assert_eq!(s.toasts.len(), 1, "même version : pas de nouvelle annonce");
+    assert!(s.command_context().update_ready);
+
+    // Échec d'une vérification automatique : la mise à jour prête reste.
+    checked(&mut s, &Status::Failed("délai dépassé".into()), true, false);
+    assert_eq!(s.update, ready);
+
+    // Demande explicite : annoncée, sans perdre l'installeur pendant la recherche.
+    let fx = update(&mut s, Msg::Command(CommandId::CheckForUpdates));
+    assert!(matches!(
+        fx[..],
+        [Effect::CheckUpdate {
+            force: true,
+            delay: Duration::ZERO
+        }]
+    ));
+    assert_eq!(s.update, ready);
+    checked(&mut s, &Status::Failed("délai dépassé".into()), true, true);
+    assert!(matches!(s.update, Status::Failed(_)));
+    checked(&mut s, &ready, false, false);
+
+    let fx = update(&mut s, Msg::Command(CommandId::InstallUpdate));
+    assert!(matches!(fx[..], [Effect::InstallUpdate]));
+    assert!(!s.requests.close_window);
+    update(&mut s, Msg::UpdateLaunched);
+    assert!(s.requests.close_window);
+}
+
+#[test]
+fn enabling_auto_update_checks_and_notes_open_settings() {
+    let mut s = state();
+    let mut off = s.settings.clone();
+    off.auto_update = false;
+    update(&mut s, Msg::UpdateSettings(Box::new(off.clone())));
+    let mut on = off;
+    on.auto_update = true;
+    let fx = update(&mut s, Msg::UpdateSettings(Box::new(on)));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::CheckUpdate { force: false, .. }))
+    );
+    assert!(matches!(
+        update(&mut s, Msg::Command(CommandId::ReleaseNotes))[..],
+        [Effect::SettingsWindow { notes: true }]
+    ));
+}

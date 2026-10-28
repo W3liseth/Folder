@@ -30,7 +30,11 @@ Si un changement contredit ce document, mets à jour le document dans le même c
 - Pas d'objet alloué par fichier listé : utiliser `DirSnapshot` (structure de tableaux).
 - Pas de `unsafe` hors de `crates/fx-win` (seule exception : le code tiers vendu dans
   `vendor/`, qu'on ne modifie que pour le porter ; cf. `vendor/*/VENDOR.md`).
-- Pas de télémétrie réseau, pas de requête réseau implicite.
+- Pas de télémétrie réseau, pas de requête réseau implicite. Seule exception : la
+  vérification de mise à jour (`fx-app::upgrade`, ARCHITECTURE.md §7.12) — réglage
+  `auto_update` désactivable, une requête par jour au plus vers les releases GitHub, rien
+  d'autre envoyé, faite dans le processus éphémère `folder.exe --update-check` (WinHTTP via
+  `fx_win::http`, jamais chargé dans une fenêtre) ; installation seulement à la demande.
 - Pas de copie de code ni d'assets de l'application Files : elle n'a servi qu'à établir
   l'inventaire fonctionnel. On réimplémente.
 
@@ -87,10 +91,13 @@ cargo run --release -p renderbench -- --tree bench-data/100k --verify
 ```
 
 Installeur Windows (Inno Setup 6 requis). En CI, `.github/workflows/installer.yml` publie
-la release `v<version>` dès que la version de `[workspace.package]` (Cargo.toml) change sur `main` :
+la release `v<version>` dès que la version de `[workspace.package]` (Cargo.toml) change sur `main`,
+avec pour description sa section de `CHANGELOG.md` : tout changement de version ajoute
+`## <version> — <date>` en tête de ce fichier (notes affichées dans Paramètres › Mises à jour,
+vérifié par `cargo test`) :
 
 ```bash
-iscc /DAppVersion=0.5.2 installer/folder.iss
+iscc /DAppVersion=0.6.0 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :
@@ -111,13 +118,13 @@ Les deux moteurs coexistent : **rendu CPU par défaut**, `--renderer glow` en op
 | Crate | Rôle | Règle clé |
 |---|---|---|
 | `fx-core` | types de domaine (`EntryMeta`, `DirSnapshot`, tri, sélection, formats) | aucune dépendance `windows`/`egui` |
-| `fx-win` | wrappers sûrs Win32/COM (énumération, `IFileOperation`, `IContextMenu`, presse-papiers, images, watch, DWM) | seul endroit avec `unsafe`, chaque bloc a `// SAFETY:` |
+| `fx-win` | wrappers sûrs Win32/COM (énumération, `IFileOperation`, `IContextMenu`, presse-papiers, images, watch, DWM, HTTPS WinHTTP et signatures pour la mise à jour) | seul endroit avec `unsafe`, chaque bloc a `// SAFETY:` |
 | `fx-fs` | énumération en flux, service de surveillance (IOCP), recherche récursive, zip | jamais de dépendance à l'UI |
 | `fx-shell` | worker STA : icônes, miniatures, ouvrir / ouvrir avec / propriétés | COM en STA uniquement |
 | `fx-commands` | métadonnées des commandes (macro `commands!`), raccourcis | toute action utilisateur a un `CommandId` |
 | `fx-store` | réglages TOML, session, SQLite (étiquettes, préférences par dossier) | écritures hors thread UI |
 | `fx-preview` | aperçus texte/code, markdown, infos | chargé seulement si le volet est ouvert |
-| `fx-app` | `AppState`, `Msg`, `update`, `Effect`, scheduler, historique, opérations | `update` pur, < 1 ms |
+| `fx-app` | `AppState`, `Msg`, `update`, `Effect`, scheduler, historique, opérations, mise à jour et notes de version (`upgrade`) | `update` pur, < 1 ms |
 | `fx-ui` | rendu egui, thème, caches de textures ; fenêtres Propriétés (`props_window`, processus `--properties`) et Paramètres (`settings_window`, processus `--settings`, modifications envoyées par `WM_COPYDATA`) | lit l'état, émet des `Msg` ; n'appelle `fx-win` que pour les exceptions ci-dessus (la fenêtre Propriétés, mini-application à part, lit ses données sur ses propres threads) |
 | `app/folder` | binaire, manifeste, ressources | |
 | `vendor/egui_software_backend` | rasteriseur CPU tiers (porté vers egui 0.37) | hors lints du workspace, modifications minimales |

@@ -654,6 +654,47 @@ limite de taille (texte : 1 Mo lus max) :
 - Rapport de crash : minidump local optionnel (`MiniDumpWriteDump`), jamais envoyé
   automatiquement.
 
+### 7.12 Mise à jour automatique et notes de version (`fx-app::upgrade`)
+
+Seule requête réseau que folder fait sans qu'on ouvre un emplacement réseau ; décision du
+2026-10-28 (auparavant hors périmètre, §9).
+
+- **Source** : releases GitHub du dépôt (`repository` de `[workspace.package]`). La dernière
+  version est lue dans la redirection de `…/releases/latest` (GET sans suivre les
+  redirections, vers `…/releases/tag/v<version>`) : pas d'API JSON (ni limite de débit, ni
+  dépendance d'analyse), préversions exclues par GitHub. Installeur :
+  `…/releases/download/v<version>/folder-setup-<version>-x64.exe`. Le dépôt doit être public.
+- **Processus éphémère** `folder.exe --update-check` : HTTPS par WinHTTP (`fx_win::http`,
+  fourni par Windows, proxy du système, pas de pile TLS embarquée), téléchargement dans
+  `%LOCALAPPDATA%\folder\updates` (`.part` renommé une fois complet, taille plafonnée à
+  64 Mo, longueur vérifiée), contrôle de l'installeur (`MZ`, et signature Authenticode du
+  même éditeur que le `folder.exe` en cours s'il est signé, `fx_win::trust`, sans
+  vérification de révocation en ligne), résultat dans `update.toml` et une ligne sur
+  stdout. winhttp.dll et ses threads ne sont ainsi jamais chargés dans une fenêtre : mémoire
+  et threads au repos inchangés.
+- **Fréquence** : réglage `auto_update` (actif par défaut, Paramètres › Mises à jour). Au
+  démarrage, un thread temporaire (`fx-update`) lit `update.toml`, partagé par toutes les
+  fenêtres (une par processus) : vérifié il y a moins de 24 h, le résultat est repris tel
+  quel (thread terminé en quelques millisecondes) ; sinon le processus de vérification part
+  5 s après le démarrage. Une fenêtre ouverte plus de 6 h revérifie à l'occasion d'une
+  image (aucun réveil programmé). La recherche à la demande (commande « Rechercher les mises
+  à jour », bouton des Paramètres) ignore le résultat du jour. Désactivée, aucune requête.
+- **Rien d'autre n'est envoyé** : deux GET anonymes, agent `folder/<version>`.
+- **Installation, seulement à la demande** : bouton « Mettre à jour » de la barre de titre
+  (`Msg::InstallUpdate`), commande « Installer la mise à jour », ou Paramètres (relayé à la
+  fenêtre principale par `Remote::InstallUpdate`). L'installeur Inno Setup est lancé en
+  silencieux (`/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH=1`), la
+  fenêtre se ferme normalement (session enregistrée), le gestionnaire de redémarrage ferme
+  les autres fenêtres folder, puis `[Run]` relance folder si `/RELAUNCH=1` (session
+  restaurée). Une installation « pour tous les utilisateurs » demande l'élévation (UAC).
+  Seul un folder lancé depuis son installation (désinstalleur `unins000.exe` à côté) se met
+  à jour ; `cargo run` affiche « Indisponible ».
+- **Notes de version** : `CHANGELOG.md` (racine), embarqué par `include_str!` et affiché
+  dans Paramètres › Mises à jour › Notes de version (commande « Notes de version » :
+  `folder.exe --settings --notes`). Format : `## <version> — <date>` puis une liste ; la
+  première section doit être la version de Cargo.toml (test `notes_cover_every_version`).
+  Le workflow Installeur en tire la description de la release.
+
 ---
 
 ## 8. Mesure et vérification des performances
@@ -726,7 +767,8 @@ traduction (fichiers Fluent `.ftl` via `fluent-bundle`), FTP (optionnel), montag
 (`MountVhd`/shell « Monter »).
 
 ### Hors périmètre
-WebView, moteur JavaScript, lecteur multimédia intégré, mise à jour automatique en arrière-plan,
+WebView, moteur JavaScript, lecteur multimédia intégré, installation d'une mise à jour sans
+demande de l'utilisateur (la vérification et le téléchargement sont automatiques, §7.12),
 télémétrie distante.
 
 ---
@@ -871,6 +913,11 @@ télémétrie distante.
   posée sur le raccourci « folder » du menu Démarrer de l'utilisateur, créé et marqué au
   besoin, supprimé quand la touche est retirée. Le désinstalleur lance
   `folder.exe --restore-explorer`, qui défait les deux.
+- **Mises à jour** (§7.12) : vérification quotidienne sur les releases GitHub dans un
+  processus éphémère, téléchargement et vérification de l'installeur, bouton « Mettre à
+  jour » dans la barre de titre, installation silencieuse puis relance avec la session ;
+  Paramètres › Mises à jour (état, recherche, réglage) et notes de version
+  (`CHANGELOG.md` embarqué).
 - **Souris** : boutons 4 et 5 pour précédent et suivant ; molette à N lignes de liste
   (30 px) par cran, réglable de 1 à 10 dans Paramètres > Général (3 par défaut, comme
   Windows ; egui n'en ferait que 40 px).
@@ -986,7 +1033,10 @@ télémétrie distante.
   fichiers, la recherche et les boîtes modales natives utilisent un thread temporaire qui
   se termine avec elles ; la persistance passe par le pool I/O (pas de thread dédié).
   Les extensions shell tierces chargées à la demande (menu contextuel, état de
-  synchronisation sur un lecteur cloud) peuvent créer leurs propres threads.
+  synchronisation sur un lecteur cloud) peuvent créer leurs propres threads. La mise à jour
+  (§7.12) ajoute un thread temporaire au démarrage, terminé en quelques millisecondes quand
+  la vérification du jour est déjà faite, sinon après celle-ci (5 s puis le temps de la
+  requête, dans un autre processus) ; aucun en mode mesure.
 - **Conflits** (§7.3) : boîtes natives d'`IFileOperation` (pas encore notre dialogue).
 - **Étiquettes** (§7.8) : clé = chemin (pas encore `FileId` + numéro de volume) ; un
   renommage hors de folder perd l'étiquette.
@@ -1036,9 +1086,9 @@ télémétrie distante.
 | Défilement 1920×1080, p95 | 2,7–3,1 ms (31–32 Mo) | ≤ 8 ms ✓ |
 | Défilement 2560×1440, p95 | 3,9–4,4 ms (38–39 Mo) | ≤ 8 ms ✓ |
 | Défilement 3840×2160, p95 (hors écran, `renderbench`) | 3,8–6,9 ms | ≤ 8 ms ✓ |
-| Exécutable | 11,4 Mo | ≤ 15 Mo ✓ |
+| Exécutable (0.6.0, avec la mise à jour : +0,15 Mo) | 13,0 Mo | ≤ 15 Mo ✓ |
 
-Tests : `cargo test --workspace` (122 tests, dont la comparaison rendu partiel / rendu
+Tests : `cargo test --workspace` (140 tests, dont la comparaison rendu partiel / rendu
 complet) ; `clippy -D warnings` propre, y compris avec la feature `wgpu`.
 
 ### 11.4 Reste à faire

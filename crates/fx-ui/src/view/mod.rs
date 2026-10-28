@@ -94,6 +94,8 @@ pub struct ViewState {
     pub(crate) palette_index: usize,
     pub(crate) search_index: usize,
     pub(crate) settings_section: usize,
+    /// Paramètres › Mises à jour : notes de version affichées.
+    pub(crate) settings_notes: bool,
     pub(crate) capture_hotkey: Option<CommandId>,
     /// Paramètres : capture du raccourci système qui ouvre folder, et refus éventuel.
     pub(crate) capture_open_hotkey: bool,
@@ -144,6 +146,7 @@ impl ViewState {
             palette_index: 0,
             search_index: 0,
             settings_section: 0,
+            settings_notes: false,
             capture_hotkey: None,
             capture_open_hotkey: false,
             open_hotkey_error: None,
@@ -346,6 +349,11 @@ fn requests(ctx: &egui::Context, f: &mut Fx<'_>) {
     if r.toggle_fullscreen {
         f.vs.fullscreen = !f.vs.fullscreen;
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(f.vs.fullscreen));
+    }
+    // Installeur de mise à jour lancé : fermeture normale (session enregistrée), avant que
+    // l'installeur n'ait à fermer folder lui-même.
+    if r.close_window {
+        ctx.send_viewport_cmd(ViewportCommand::Close);
     }
     if r.shell_menu {
         let sel = f.state.pane().selected_paths();

@@ -5,6 +5,10 @@
 //! Chaque modification est appliquée ici (affichage) et envoyée aussitôt à la fenêtre
 //! principale par `WM_COPYDATA` (`fx_win::ipc`, `fx_store::remote`) : c'est elle qui
 //! l'applique et l'enregistre, seule à écrire les réglages et la base des étiquettes.
+//!
+//! Mises à jour : la recherche à la demande est faite ici (même processus de vérification
+//! que la fenêtre principale, résultat dans le fichier partagé) ; l'installation est confiée
+//! à la fenêtre principale, qui se ferme en enregistrant sa session.
 
 use std::time::{Duration, Instant};
 
@@ -34,10 +38,16 @@ struct SettingsApp {
     dark: Option<bool>,
     /// Relecture des étiquettes après une création (l'identifiant vient de la base).
     reload_tags_at: Option<Instant>,
+    /// Résultats des recherches de mise à jour (thread de travail).
+    updates: (
+        crossbeam_channel::Sender<Msg>,
+        crossbeam_channel::Receiver<Msg>,
+    ),
 }
 
-/// Ouvre la fenêtre Paramètres et rend la main à sa fermeture.
-pub fn run(owner: Option<isize>) -> Result<(), Error> {
+/// Ouvre la fenêtre Paramètres et rend la main à sa fermeture ; `notes` : sur les notes de
+/// version.
+pub fn run(owner: Option<isize>, notes: bool) -> Result<(), Error> {
     let viewport = ViewportBuilder::default()
         .with_title(TITLE)
         .with_app_id("folder-settings")
@@ -52,7 +62,7 @@ pub fn run(owner: Option<isize>) -> Result<(), Error> {
     let mut init_error = None;
     let result =
         egui_software_backend::run_app_with_software_backend(config, |ctx| match SettingsApp::new(
-            &ctx, owner,
+            &ctx, owner, notes,
         ) {
             Ok(app) => Shell(Some(app)),
             Err(e) => {
@@ -79,14 +89,16 @@ impl egui_software_backend::App for Shell {
 }
 
 impl SettingsApp {
-    fn new(ctx: &Context, owner: Option<isize>) -> std::io::Result<Self> {
+    fn new(ctx: &Context, owner: Option<isize>, notes: bool) -> std::io::Result<Self> {
         let paths = Paths::standard();
         let settings = fx_store::load_settings(&paths);
         let system_accent = theme::system_accent();
         let accent = theme::accent_of(&settings, system_accent);
         theme::install(ctx, accent);
         let tags = load_tags(&paths);
-        let state = AppState::new(settings, tags, Vec::new());
+        let mut state = AppState::new(settings, tags, Vec::new());
+        // Dernier résultat connu (petit fichier, comme les réglages lus ci-dessus).
+        state.update = fx_app::upgrade::cached(&paths);
         // Le cache d'images et le worker shell ne servent pas ici, mais la page en a besoin.
         let (_, rx) = crossbeam_channel::unbounded();
         let shell = fx_shell::ShellWorker::new(std::sync::Arc::new(|_, _| {}))?;
@@ -103,6 +115,10 @@ impl SettingsApp {
         }
         let mut vs = ViewState::new(accent);
         vs.system_accent = system_accent;
+        if notes {
+            vs.settings_section = crate::view::settings::UPDATES;
+            vs.settings_notes = true;
+        }
         Ok(Self {
             state,
             vs,
@@ -115,6 +131,7 @@ impl SettingsApp {
             hwnd: None,
             dark: None,
             reload_tags_at: None,
+            updates: crossbeam_channel::unbounded(),
         })
     }
 
@@ -132,6 +149,9 @@ impl SettingsApp {
             self.state.tags = load_tags(&self.paths);
         } else if let Some(t) = self.reload_tags_at {
             ctx.request_repaint_after(t.saturating_duration_since(Instant::now()));
+        }
+        while let Ok(m) = self.updates.1.try_recv() {
+            let _ = fx_app::update(&mut self.state, m);
         }
 
         let mut f = Fx {
@@ -161,22 +181,55 @@ impl SettingsApp {
                 Some(Remote::SaveTag(t.clone()))
             }
             Msg::DeleteTag(id) => Some(Remote::DeleteTag(*id)),
+            Msg::InstallUpdate => Some(Remote::InstallUpdate),
             Msg::CloseOverlays => {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
                 None
             }
             _ => None,
         };
-        let Some(remote) = remote else { return };
-        let delivered = self
-            .owner
-            .is_some_and(|h| fx_win::ipc::send(h, &remote.encode()));
-        // Fenêtre principale fermée entre-temps : les réglages sont enregistrés ici.
-        if !delivered && let Remote::Settings(s) = &remote {
-            let _ = fx_store::save_settings(&self.paths, s);
+        if let Some(remote) = remote {
+            let delivered = self
+                .owner
+                .is_some_and(|h| fx_win::ipc::send(h, &remote.encode()));
+            match &remote {
+                // Fenêtre principale fermée entre-temps : les réglages sont enregistrés ici.
+                Remote::Settings(s) if !delivered => {
+                    let _ = fx_store::save_settings(&self.paths, s);
+                }
+                // Pas de fenêtre principale : l'installeur est lancé d'ici.
+                Remote::InstallUpdate if !delivered => {
+                    match fx_app::upgrade::install(&self.paths) {
+                        Ok(()) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                        Err(e) => {
+                            self.state.update = fx_app::upgrade::Status::Failed(e.to_string())
+                        }
+                    }
+                    return;
+                }
+                Remote::InstallUpdate => return,
+                _ => {}
+            }
         }
-        // Les effets (écritures) reviennent à la fenêtre principale : ignorés ici.
-        let _ = fx_app::update(&mut self.state, msg);
+        // Les effets reviennent à la fenêtre principale (écritures), sauf la recherche de
+        // mise à jour, faite ici pour en afficher le résultat.
+        for effect in fx_app::update(&mut self.state, msg) {
+            if let fx_app::Effect::CheckUpdate { force, .. } = effect {
+                let (paths, tx, ctx) = (self.paths.clone(), self.updates.0.clone(), ctx.clone());
+                let _ = std::thread::Builder::new()
+                    .name("folder-update".into())
+                    .spawn(move || {
+                        let (status, fresh) =
+                            fx_app::upgrade::check(&paths, force, std::time::Duration::ZERO);
+                        let _ = tx.send(Msg::UpdateChecked {
+                            status,
+                            fresh,
+                            force,
+                        });
+                        ctx.request_repaint();
+                    });
+            }
+        }
     }
 
     /// Premier affichage centré sur la fenêtre principale ; barre de titre au thème.

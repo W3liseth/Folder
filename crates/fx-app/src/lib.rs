@@ -13,6 +13,7 @@ pub mod scheduler;
 pub mod state;
 pub mod system;
 pub mod update;
+pub mod upgrade;
 
 pub use effect::Effect;
 pub use history::Location;

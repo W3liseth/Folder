@@ -74,6 +74,8 @@ pub mod glyph {
     pub const PALETTE: &str = "\u{E790}";
     pub const HIDDEN: &str = "\u{ED1A}";
     pub const DOWNLOAD: &str = "\u{E896}";
+    pub const SYNC: &str = "\u{E895}";
+    pub const NOTES: &str = "\u{E7BC}";
     pub const DESKTOP: &str = "\u{E7F4}";
     /// Restaurer depuis la corbeille.
     pub const UNDELETE: &str = "\u{E777}";

@@ -89,8 +89,11 @@ pub enum Effect {
         parsing: String,
     },
     LoadWsl,
-    /// Fenêtre Paramètres (processus `--settings`), ou ramenée au premier plan si ouverte.
-    SettingsWindow,
+    /// Fenêtre Paramètres (processus `--settings`), ou ramenée au premier plan si ouverte ;
+    /// `notes` : ouverte sur les notes de version.
+    SettingsWindow {
+        notes: bool,
+    },
     RunAsAdmin(PathBuf),
     OpenTerminal(PathBuf),
     Job {
@@ -133,4 +136,14 @@ pub enum Effect {
     /// Au démarrage, Windows + E pris par folder : relance le processus résident s'il ne
     /// tourne plus (arrêté, ou exécutable remplacé par une mise à jour).
     EnsureWinE,
+    /// Recherche de mise à jour (cf. `upgrade::check`) ; `delay` : avant une vérification
+    /// en ligne (automatique : après le démarrage, pour ne pas le ralentir).
+    CheckUpdate {
+        force: bool,
+        delay: std::time::Duration,
+    },
+    /// Lance l'installeur prêt d'après le fichier partagé (cf. `upgrade::cached` : il a pu
+    /// être téléchargé par une autre fenêtre ou par les Paramètres), ou signale qu'il n'y
+    /// en a pas.
+    InstallUpdate,
 }
