@@ -647,6 +647,13 @@ fn group_label(g: Group) -> &'static str {
 /// État de la mise à jour, recherche à la demande, réglage automatique, notes de version.
 fn updates(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     let pal = f.pal;
+    // Page ouverte : un résultat ancien est revérifié plutôt qu'affiché comme « à jour ».
+    if !f.vs.update_refreshed {
+        f.vs.update_refreshed = true;
+        if s.auto_update && f.state.update.needs_refresh(fx_app::upgrade::PAGE_MAX_AGE) {
+            f.send(Msg::CheckUpdate { force: true });
+        }
+    }
     let status = &f.state.update;
     let (glyph_, color, line) = match status {
         Status::Ready { version, .. } => (
@@ -654,11 +661,11 @@ fn updates(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
             pal.accent,
             format!("folder {version} est téléchargé et prêt à être installé."),
         ),
-        Status::UpToDate { checked, .. } => (
+        Status::UpToDate { latest, checked } => (
             glyph::SUCCESS,
             pal.success,
             format!(
-                "folder est à jour. Dernière vérification : {}.",
+                "folder est à jour : {latest} est la dernière version publiée (vérifié {}).",
                 since(*checked)
             ),
         ),
@@ -740,7 +747,7 @@ fn updates(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
         ui,
         f,
         "Rechercher automatiquement les mises à jour",
-        "Au plus une fois par jour, sur GitHub ; l'installation reste à votre demande.",
+        "Au plus une fois par heure, sur GitHub ; l'installation reste à votre demande.",
         |ui| toggle(ui, &mut s.auto_update),
     );
     let mut open_notes = false;

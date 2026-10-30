@@ -6,7 +6,8 @@
 //!   (mémoire et threads au repos inchangés). Si elle est plus récente, ce processus
 //!   télécharge son installeur, vérifie sa signature et note le résultat dans `update.toml`,
 //!   partagé par toutes les fenêtres (une par processus).
-//! - Sans demande explicite, au plus une requête par jour, et seulement si le réglage
+//! - Sans demande explicite, au plus une requête par heure (résultat partagé par toutes les
+//!   fenêtres), et à l'ouverture de Paramètres › Mises à jour, seulement si le réglage
 //!   `auto_update` est actif ; aucune donnée envoyée (pas même un identifiant).
 //! - L'installation reste à la demande : installeur Inno Setup en mode silencieux, qui ferme
 //!   folder puis le relance (`/RELAUNCH=1`, cf. `installer/folder.iss`).
@@ -25,7 +26,12 @@ pub const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 pub const CHECK_ARG: &str = "--update-check";
 
 const REPO: &str = env!("CARGO_PKG_REPOSITORY");
-const DAY: i64 = 24 * 3600;
+/// Durée de validité du résultat partagé pour une vérification automatique (s) : une
+/// version publiée est proposée dans l'heure, quel que soit le nombre de fenêtres.
+pub const MAX_AGE: i64 = 3600;
+/// Paramètres › Mises à jour ouvert : résultat repris tel quel s'il a moins de 5 min, sinon
+/// revérifié (la page ne doit pas annoncer « à jour » d'après une vieille vérification).
+pub const PAGE_MAX_AGE: i64 = 5 * 60;
 /// Garde-fou : l'installeur fait quelques Mo.
 const MAX_INSTALLER: u64 = 64 << 20;
 /// Pas de console (build debug) pour le processus de vérification.
@@ -129,6 +135,17 @@ impl Status {
             _ => None,
         }
     }
+
+    /// À revérifier : rien de connu, échec, ou « à jour » d'après une vérification plus
+    /// vieille que `max_age` secondes. Une mise à jour prête, une recherche en cours ou une
+    /// version hors installation ne le sont jamais.
+    pub fn needs_refresh(&self, max_age: i64) -> bool {
+        match self {
+            Self::Unknown | Self::Failed(_) => true,
+            Self::UpToDate { checked, .. } => !(0..max_age).contains(&(now() - checked)),
+            Self::Checking | Self::Ready { .. } | Self::NotInstalled => false,
+        }
+    }
 }
 
 /// folder lancé depuis le dossier où l'installeur l'a mis (son désinstalleur est à côté).
@@ -160,7 +177,7 @@ pub fn check(paths: &Paths, force: bool, delay: std::time::Duration) -> (Status,
     }
     if !force
         && let Some(state) = fx_store::load_update(paths)
-        && (0..DAY).contains(&(now() - state.checked))
+        && (0..MAX_AGE).contains(&(now() - state.checked))
         && let Some(status) = from_state(&state)
     {
         return (status, false);
@@ -471,6 +488,30 @@ mod tests {
             assert_eq!(Version::parse(bad), None, "{bad}");
         }
         assert_eq!(Version::current().to_string(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn refresh_when_stale() {
+        let up = |age: i64| Status::UpToDate {
+            latest: "0.7.0".into(),
+            checked: now() - age,
+        };
+        assert!(!up(0).needs_refresh(PAGE_MAX_AGE));
+        assert!(up(PAGE_MAX_AGE + 1).needs_refresh(PAGE_MAX_AGE));
+        assert!(
+            up(2 * 24 * 3600).needs_refresh(MAX_AGE),
+            "vu « à jour » il y a 2 jours"
+        );
+        assert!(up(-60).needs_refresh(PAGE_MAX_AGE), "horloge reculée");
+        assert!(Status::Unknown.needs_refresh(PAGE_MAX_AGE));
+        assert!(Status::Failed("x".into()).needs_refresh(PAGE_MAX_AGE));
+        assert!(!Status::Checking.needs_refresh(PAGE_MAX_AGE));
+        assert!(!Status::NotInstalled.needs_refresh(PAGE_MAX_AGE));
+        let ready = Status::Ready {
+            version: "0.8.0".into(),
+            installer: PathBuf::from("x.exe"),
+        };
+        assert!(!ready.needs_refresh(PAGE_MAX_AGE));
     }
 
     #[test]

@@ -32,7 +32,7 @@ pub use bench::BenchMode;
 const IO_THREADS: usize = 2;
 
 /// Intervalle entre deux vérifications de mise à jour d'une fenêtre restée ouverte.
-const UPDATE_INTERVAL: Duration = Duration::from_secs(6 * 3600);
+const UPDATE_INTERVAL: Duration = Duration::from_secs(fx_app::upgrade::MAX_AGE as u64);
 
 /// Corps du processus `folder.exe --update-check` (cf. `fx_app::upgrade`) : vérifie en
 /// ligne, télécharge si besoin, et renvoie la ligne de réponse à écrire sur stdout.
@@ -376,8 +376,8 @@ impl Core {
                     self.session(),
                 )));
         }
-        // Fenêtre restée ouverte longtemps : nouvelle vérification (une requête par jour au
-        // plus, cf. `fx_app::upgrade::check`). Seulement à l'occasion d'une image : aucun
+        // Fenêtre restée ouverte : nouvelle vérification chaque heure (une requête par heure
+        // au plus pour toutes les fenêtres, cf. `fx_app::upgrade::check`). Seulement à l'occasion d'une image : aucun
         // réveil n'est programmé pour cela.
         if self.state.settings.auto_update
             && let Some(t) = &mut self.last_update_check

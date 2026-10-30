@@ -32,7 +32,8 @@ Si un changement contredit ce document, mets à jour le document dans le même c
   `vendor/`, qu'on ne modifie que pour le porter ; cf. `vendor/*/VENDOR.md`).
 - Pas de télémétrie réseau, pas de requête réseau implicite. Seule exception : la
   vérification de mise à jour (`fx-app::upgrade`, ARCHITECTURE.md §7.12) — réglage
-  `auto_update` désactivable, une requête par jour au plus vers les releases GitHub, rien
+  `auto_update` désactivable, une requête par heure au plus vers les releases GitHub (et à
+  l'ouverture de Paramètres › Mises à jour si le résultat a plus de 5 min), rien
   d'autre envoyé, faite dans le processus éphémère `folder.exe --update-check` (WinHTTP via
   `fx_win::http`, jamais chargé dans une fenêtre) ; installation seulement à la demande.
 - Pas de copie de code ni d'assets de l'application Files : elle n'a servi qu'à établir
@@ -97,7 +98,7 @@ avec pour description sa section de `CHANGELOG.md` : tout changement de version 
 vérifié par `cargo test`) :
 
 ```bash
-iscc /DAppVersion=0.8.0 installer/folder.iss
+iscc /DAppVersion=0.8.1 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :

@@ -97,7 +97,7 @@ impl Paths {
 }
 
 /// Résultat de la dernière vérification de mise à jour, partagé par toutes les fenêtres
-/// (une par processus) : une seule requête réseau par jour, quel que soit leur nombre.
+/// (une par processus) : une seule requête réseau par heure, quel que soit leur nombre.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UpdateState {

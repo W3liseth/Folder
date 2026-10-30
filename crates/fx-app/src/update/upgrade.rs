@@ -41,9 +41,12 @@ pub(crate) fn checked(state: &mut AppState, status: Status, fresh: bool, force: 
                 ToastKind::Info,
             );
         }
-        Status::UpToDate { .. } if force => {
+        Status::UpToDate { latest, .. } if force => {
             state.toast(
-                format!("folder {} est à jour.", env!("CARGO_PKG_VERSION")),
+                format!(
+                    "folder {} est à jour (dernière version publiée : {latest}).",
+                    env!("CARGO_PKG_VERSION")
+                ),
                 ToastKind::Success,
             );
         }

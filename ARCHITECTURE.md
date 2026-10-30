@@ -681,11 +681,19 @@ Seule requête réseau que folder fait sans qu'on ouvre un emplacement réseau ;
   et threads au repos inchangés.
 - **Fréquence** : réglage `auto_update` (actif par défaut, Paramètres › Mises à jour). Au
   démarrage, un thread temporaire (`fx-update`) lit `update.toml`, partagé par toutes les
-  fenêtres (une par processus) : vérifié il y a moins de 24 h, le résultat est repris tel
-  quel (thread terminé en quelques millisecondes) ; sinon le processus de vérification part
-  5 s après le démarrage. Une fenêtre ouverte plus de 6 h revérifie à l'occasion d'une
-  image (aucun réveil programmé). La recherche à la demande (commande « Rechercher les mises
-  à jour », bouton des Paramètres) ignore le résultat du jour. Désactivée, aucune requête.
+  fenêtres (une par processus) : vérifié il y a moins d'une heure (`MAX_AGE`), le résultat
+  est repris tel quel (thread terminé en quelques millisecondes) ; sinon le processus de
+  vérification part 5 s après le démarrage. Une fenêtre ouverte revérifie chaque heure à
+  l'occasion d'une image (aucun réveil programmé). L'ouverture de Paramètres › Mises à jour
+  revérifie si le résultat a plus de 5 min (`PAGE_MAX_AGE`) : la page n'annonce jamais
+  « à jour » d'après une vieille vérification, et dit quelle est la dernière version
+  publiée. La recherche à la demande (commande « Rechercher les mises à jour », bouton des
+  Paramètres) ignore le résultat partagé. Désactivée, aucune requête automatique.
+  2026-10-30 : d'abord 24 h (6 h pour une fenêtre ouverte) ; une version publiée n'était
+  alors proposée qu'après des heures, et la page affichait « à jour » d'après le cache.
+- **Délai de publication** : la release n'existe qu'à la fin du workflow Installeur
+  (≈ 4 min après le push, plus l'approbation SignPath quand la signature est active) ;
+  avant, folder répond à raison que la version installée est la dernière publiée.
 - **Rien d'autre n'est envoyé** : deux GET anonymes, agent `folder/<version>`.
 - **Installation, seulement à la demande** : bouton « Mettre à jour » de la barre de titre
   (`Msg::InstallUpdate`), commande « Installer la mise à jour », ou Paramètres (relayé à la

@@ -5,6 +5,15 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.8.1 — 2026-10-30
+
+- Mises à jour proposées plus vite : folder vérifie chaque heure (au lieu d'une fois par
+  jour), et l'ouverture de Paramètres › Mises à jour revérifie aussitôt si la dernière
+  vérification date de plus de 5 minutes. La page n'annonce plus « à jour » d'après une
+  vieille vérification.
+- « À jour » indique la dernière version publiée : une version tout juste poussée n'est
+  proposée qu'une fois sa release publiée, quelques minutes plus tard.
+
 ## 0.8.0 — 2026-10-30
 
 - Branche Git dans la barre d'état : dans un dépôt Git, le logo Git et la branche active

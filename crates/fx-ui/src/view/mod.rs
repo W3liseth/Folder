@@ -98,6 +98,8 @@ pub struct ViewState {
     pub(crate) settings_section: usize,
     /// Paramètres › Mises à jour : notes de version affichées.
     pub(crate) settings_notes: bool,
+    /// Paramètres › Mises à jour : résultat revérifié à la première ouverture de la page.
+    pub(crate) update_refreshed: bool,
     pub(crate) capture_hotkey: Option<CommandId>,
     /// Paramètres : capture du raccourci système qui ouvre folder, et refus éventuel.
     pub(crate) capture_open_hotkey: bool,
@@ -154,6 +156,7 @@ impl ViewState {
             search_index: 0,
             settings_section: 0,
             settings_notes: false,
+            update_refreshed: false,
             capture_hotkey: None,
             capture_open_hotkey: false,
             open_hotkey_error: None,

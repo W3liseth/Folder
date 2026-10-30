@@ -72,7 +72,7 @@ pub struct Settings {
     pub win_e_opens_folder: bool,
     /// Raccourci système qui ouvre folder, même fermé (inactif si Windows + E l'ouvre déjà).
     pub open_hotkey: Option<HotKey>,
-    /// Recherche une nouvelle version au démarrage (au plus une fois par jour) et la
+    /// Recherche une nouvelle version (au plus une fois par heure) et la
     /// télécharge ; l'installation reste à la demande (ARCHITECTURE.md §7.12).
     pub auto_update: bool,
     /// Largeur de la colonne Nom ; 0 : automatique (occupe la place restante).
