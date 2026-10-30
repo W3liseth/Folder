@@ -53,6 +53,11 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             let loc = state.pane().location().clone();
             let mut fx = nav::load(state, pane_id, loc, false);
             fx.push(Effect::LoadDrives);
+            state.requests.refresh_images = true;
+            // L'aperçu garde son contenu jusqu'à la relecture (pas de clignotement).
+            if let Some(p) = &state.preview {
+                fx.push(Effect::LoadPreview(p.path.clone()));
+            }
             fx
         }
         Home => nav::load(state, pane_id, Location::Home, true),

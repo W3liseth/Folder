@@ -42,6 +42,9 @@ enum Slot {
         tex: TextureHandle,
         bytes: usize,
         used: u64,
+        /// Actualiser : redemandée à son prochain affichage, l'ancienne texture restant
+        /// affichée jusqu'à l'arrivée de la nouvelle (pas de clignotement).
+        stale: bool,
     },
     Failed,
 }
@@ -88,20 +91,20 @@ impl ImageCache {
                         color,
                         TextureOptions::LINEAR,
                     );
-                    if matches!(key, ImageKey::Thumb { .. }) {
-                        self.thumb_bytes += bytes;
-                    } else {
-                        self.icon_bytes += bytes;
-                    }
+                    *self.bytes_of(&key) += bytes;
                     Slot::Ready {
                         tex,
                         bytes,
                         used: self.frame,
+                        stale: false,
                     }
                 }
                 _ => Slot::Failed,
             };
-            self.slots.insert(key, slot);
+            // Remplace l'image d'avant une actualisation : ses octets ne comptent plus.
+            if let Some(Slot::Ready { bytes, .. }) = self.slots.insert(key.clone(), slot) {
+                *self.bytes_of(&key) -= bytes;
+            }
         }
         if got_any {
             self.evict();
@@ -174,17 +177,23 @@ impl ImageCache {
         source: &std::path::Path,
     ) -> Option<&TextureHandle> {
         let frame = self.frame;
+        let request = || ImageRequest {
+            key: key.clone(),
+            path: PathBuf::from(source),
+            size: u32::from(key.size()),
+            kind: key.kind(),
+        };
         match self.slots.get_mut(key) {
-            Some(Slot::Ready { used, .. }) => *used = frame,
+            Some(Slot::Ready { used, stale, .. }) => {
+                *used = frame;
+                if std::mem::take(stale) {
+                    shell.request_image(request());
+                }
+            }
             Some(Slot::Pending | Slot::Failed) => return None,
             None => {
                 self.slots.insert(key.clone(), Slot::Pending);
-                shell.request_image(ImageRequest {
-                    key: key.clone(),
-                    path: PathBuf::from(source),
-                    size: u32::from(key.size()),
-                    kind: key.kind(),
-                });
+                shell.request_image(request());
                 return None;
             }
         }
@@ -206,6 +215,26 @@ impl ImageCache {
         // Demandes abandonnées : refaites au prochain affichage.
         for o in self.overlays.values_mut() {
             o.pending = false;
+        }
+    }
+
+    /// Actualiser : les images en échec sont oubliées (redemandées) et les autres relues à
+    /// leur prochain affichage — un fichier réenregistré sans changer de date, une icône
+    /// d'application modifiée… Les icônes superposées ont leur propre rafraîchissement.
+    pub fn refresh(&mut self) {
+        self.slots.retain(|_, s| !matches!(s, Slot::Failed));
+        for (key, slot) in &mut self.slots {
+            if let Slot::Ready { stale, .. } = slot {
+                *stale = !matches!(key, ImageKey::Overlay { .. });
+            }
+        }
+    }
+
+    fn bytes_of(&mut self, key: &ImageKey) -> &mut usize {
+        if matches!(key, ImageKey::Thumb { .. }) {
+            &mut self.thumb_bytes
+        } else {
+            &mut self.icon_bytes
         }
     }
 

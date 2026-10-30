@@ -392,6 +392,8 @@ pub struct UiRequests {
     pub toggle_fullscreen: bool,
     /// Fermer la fenêtre (installeur de mise à jour lancé).
     pub close_window: bool,
+    /// Actualiser : relire les miniatures et oublier les images en échec.
+    pub refresh_images: bool,
 }
 
 pub struct AppState {

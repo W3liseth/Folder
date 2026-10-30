@@ -32,6 +32,8 @@ pub fn texture(
         let key = ImageKey::Thumb {
             path: path.clone(),
             size,
+            modified: e.meta.modified,
+            len: e.meta.size,
         };
         if !f.images.failed(&key)
             && let Some(t) = f.images.get(f.shell, &key, &path)
@@ -179,8 +181,7 @@ pub fn interact(
     let path = fx_app::state::path_of(l, e.id);
     let is_dir = e.meta.is_dir();
     let mods = ui.input(|i| i.modifiers);
-
-    if resp.clicked() {
+    let click = |f: &mut Fx<'_>| {
         f.send(Msg::FocusPane(pane));
         match column {
             Some(c) => f.send(Msg::ColumnClick {
@@ -195,6 +196,28 @@ pub fn interact(
                 shift: mods.shift,
             }),
         }
+    };
+
+    // Sélection dès l'appui, comme l'Explorateur : on voit ce qui va être glissé. Seule
+    // exception, un élément déjà sélectionné (sans Maj) : le relâchement décide, pour qu'un
+    // glisser emporte toute la sélection et que Ctrl + clic ne la retire qu'au relâchement.
+    if resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+        let now = !selected || mods.shift;
+        f.vs.pressed = now.then_some((pane, e.id));
+        if now {
+            click(f);
+        }
+    }
+    if resp.drag_started() {
+        f.vs.pressed = None; // pas de clic au relâchement d'un glisser
+    }
+    if resp.clicked() {
+        // Sélectionné à l'appui : il ne l'était pas avant ce clic.
+        let was_selected = f.vs.pressed.take() != Some((pane, e.id));
+        if was_selected {
+            click(f);
+        }
+        let selected = selected && was_selected;
         // Ouverture d'un simple clic (réglage).
         if f.state.settings.single_click && !mods.command && !mods.shift && column.is_none() {
             f.send(Msg::Activate { pane, pos });

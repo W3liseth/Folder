@@ -858,6 +858,74 @@ fn watcher_changes_update_listing() {
 }
 
 #[test]
+fn refresh_rereads_images_and_rewritten_preview() {
+    let mut s = state();
+    s.settings.show_preview = true;
+    open(&mut s, r"C:\a", &[("a.png", false), ("b.png", false)]);
+    let p = pane(&s);
+    let fx = update(
+        &mut s,
+        Msg::Click {
+            pane: p,
+            pos: 0,
+            ctrl: false,
+            shift: false,
+        },
+    );
+    let shown = PathBuf::from(r"C:\a\a.png");
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::LoadPreview(x) if *x == shown))
+    );
+    update(
+        &mut s,
+        Msg::PreviewLoaded(Some(fx_preview::Preview {
+            path: shown.clone(),
+            size: 10,
+            created: 1,
+            modified: 1,
+            attributes: 0,
+            content: fx_preview::Content::Image,
+        })),
+    );
+    // Actualiser : liste relue, images et aperçu aussi.
+    let fx = update(&mut s, Msg::Command(CommandId::Refresh));
+    assert!(fx.iter().any(|e| matches!(e, Effect::Enumerate { .. })));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::LoadPreview(x) if *x == shown))
+    );
+    assert!(s.requests.refresh_images);
+    update(&mut s, Msg::ConsumeRequests);
+    assert!(!s.requests.refresh_images);
+
+    // Fichier affiché réenregistré : l'aperçu est relu ; un autre fichier ne le relit pas.
+    let rewritten = |name: &str, modified| {
+        Msg::DirChanged(DirEvent {
+            key: p.0,
+            changes: vec![Change::Upsert {
+                name: name.encode_utf16().collect(),
+                stat: Stat {
+                    attributes: 0,
+                    size: 10,
+                    created: 1,
+                    modified,
+                },
+            }],
+        })
+    };
+    let fx = update(&mut s, rewritten("b.png", 2));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::LoadPreview(_))));
+    let fx = update(&mut s, rewritten("a.png", 1));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::LoadPreview(_))));
+    let fx = update(&mut s, rewritten("a.png", 2));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::LoadPreview(x) if *x == shown))
+    );
+}
+
+#[test]
 fn tags_and_tag_location() {
     let mut s = state();
     open(&mut s, r"C:\a", &[]);

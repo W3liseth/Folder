@@ -89,9 +89,12 @@ fn content(ui: &mut Ui, f: &mut Fx<'_>) {
                 .unwrap_or_default();
             let dir = path.parent().unwrap_or(&path).to_path_buf();
             let key = if is_image {
+                let p = st.preview.as_ref();
                 ImageKey::Thumb {
                     path: path.clone(),
                     size: (big * ppp) as u16,
+                    modified: p.map_or(0, |p| p.modified),
+                    len: p.map_or(0, |p| p.size),
                 }
             } else {
                 image_request(&dir, &name, &ext, is_dir, (64.0 * ppp) as u16).0

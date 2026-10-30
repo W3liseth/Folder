@@ -12,8 +12,15 @@ pub enum ImageKey {
     /// Icône propre à un fichier ou dossier (.exe, .lnk, racines de lecteurs, dossiers
     /// spéciaux…).
     Path { path: PathBuf, size: u16 },
-    /// Miniature d'un fichier.
-    Thumb { path: PathBuf, size: u16 },
+    /// Miniature d'un fichier. La date de modification (FILETIME) et la taille en font
+    /// partie : un fichier réenregistré, ou encore en cours d'écriture quand sa miniature a
+    /// été demandée (le shell rend alors l'icône du type), change de clé et est relu.
+    Thumb {
+        path: PathBuf,
+        size: u16,
+        modified: i64,
+        len: u64,
+    },
     /// Icône superposée d'état de synchronisation (index dans la liste d'images système,
     /// cf. `fx_win::overlay`), partagée par tous les fichiers qui la portent.
     Overlay { index: i32, size: u16 },

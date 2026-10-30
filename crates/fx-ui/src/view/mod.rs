@@ -123,6 +123,9 @@ pub struct ViewState {
     pub(crate) diag: diagnostics::Sample,
     pub(crate) dont_ask_delete: bool,
     pub(crate) slow_click: Option<SlowClick>,
+    /// Élément `(volet, id)` sélectionné dès l'appui du bouton : son relâchement ne refait
+    /// pas le clic (cf. `items::interact`).
+    pub(crate) pressed: Option<(PaneId, u32)>,
     /// Transition de contenu par volet : `(contenu affiché, début, nature)`.
     pub(crate) nav_anim: HashMap<PaneId, (u64, Instant, fx_app::state::NavKind)>,
     /// Onglet en cours de glisser (réordonnancement ou détachement).
@@ -184,6 +187,7 @@ impl ViewState {
             diag: diagnostics::Sample::default(),
             dont_ask_delete: false,
             slow_click: None,
+            pressed: None,
             nav_anim: HashMap::new(),
             tab_drag: None,
             peer: peer::PeerState::default(),
@@ -402,6 +406,9 @@ fn requests(ctx: &egui::Context, f: &mut Fx<'_>) {
                 .unwrap_or_else(|| ctx.content_rect().center());
             shellmenu::open_more(ctx, f, t, Some(at));
         }
+    }
+    if r.refresh_images {
+        f.images.refresh();
     }
     if r.focus_path {
         f.vs.path_edit = Some(match f.state.pane().location() {

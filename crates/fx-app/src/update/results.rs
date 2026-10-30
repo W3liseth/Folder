@@ -170,7 +170,35 @@ pub fn dir_changed(state: &mut AppState, ev: DirEvent) -> Vec<Effect> {
         return nav::load(state, pane, Location::Dir(dir), false);
     }
     apply_changes(state, pane, &ev.changes);
-    vec![]
+    let dir = state.find_pane(pane).and_then(|p| match p.location() {
+        Location::Dir(d) => Some(d.clone()),
+        _ => None,
+    });
+    dir.and_then(|d| stale_preview(state, &d, &ev.changes))
+        .into_iter()
+        .collect()
+}
+
+/// Relecture de l'aperçu si le fichier affiché vient d'être réécrit (date ou taille changée).
+fn stale_preview(state: &AppState, dir: &Path, changes: &[Change]) -> Option<Effect> {
+    let st = state.preview.as_ref()?;
+    let shown = st.preview.as_ref()?;
+    if !st.path.parent().is_some_and(|p| same_dir(p, dir)) {
+        return None;
+    }
+    let name = st.path.file_name()?.as_encoded_bytes();
+    let mut b = Vec::new();
+    changes
+        .iter()
+        .any(|c| match c {
+            Change::Upsert { name: n, stat } => {
+                b.clear();
+                wtf8::push_utf16(&mut b, n);
+                b == name && (stat.modified != shown.modified || stat.size != shown.size)
+            }
+            _ => false,
+        })
+        .then(|| Effect::LoadPreview(st.path.clone()))
 }
 
 /// État relu après une opération : appliqué à chaque volet qui affiche `dir`.
@@ -185,7 +213,7 @@ pub fn paths_changed(state: &mut AppState, dir: &Path, changes: &[Change]) -> Ve
     for pane in panes {
         apply_changes(state, pane, changes);
     }
-    vec![]
+    stale_preview(state, dir, changes).into_iter().collect()
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
