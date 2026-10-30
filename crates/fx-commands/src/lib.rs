@@ -34,6 +34,8 @@ pub struct CommandContext {
     pub update_ready: bool,
     /// Le centre d'état a des opérations terminées.
     pub has_op_history: bool,
+    /// Le dossier affiché est dans un dépôt Git.
+    pub git_repo: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +164,7 @@ commands! {
     Diagnostics => Application, "Diagnostics", "\u{E9D9}", ["F12"];
     StatusCenter => Application, "Centre d'état", "\u{E81C}", [];
     ClearOperationHistory => Application, "Effacer l'historique des opérations", "\u{E74D}", [];
+    GitBranches => Application, "Changer de branche Git", "\u{E8B1}", ["Ctrl+Shift+B"];
     CheckForUpdates => Application, "Rechercher les mises à jour", "\u{E895}", [];
     InstallUpdate => Application, "Installer la mise à jour", "\u{E896}", [];
     ReleaseNotes => Application, "Notes de version", "\u{E7BC}", [];
@@ -204,6 +207,7 @@ impl CommandId {
             EmptyRecycleBin => true,
             InstallUpdate => c.update_ready,
             ClearOperationHistory => c.has_op_history,
+            GitBranches => c.git_repo,
             _ => true,
         }
     }

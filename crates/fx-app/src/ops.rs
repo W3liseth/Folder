@@ -166,6 +166,59 @@ impl Operation {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
+    /// Chemins dont l'opération a pu changer l'état (sources, destinations, éléments créés),
+    /// relus à sa fin pour mettre les listes à jour sans dépendre de la surveillance.
+    pub(crate) fn touched(&self) -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = Vec::new();
+        let renamed = |item: &Path, name: &str| item.parent().map(|d| d.join(name));
+        match &self.job {
+            Job::File(FileOp::Copy { sources, dest }) => {
+                v.extend(
+                    sources
+                        .iter()
+                        .filter_map(|s| s.file_name().map(|n| dest.join(n))),
+                );
+            }
+            Job::File(FileOp::Move { sources, dest }) => {
+                v.extend(sources.iter().cloned());
+                v.extend(
+                    sources
+                        .iter()
+                        .filter_map(|s| s.file_name().map(|n| dest.join(n))),
+                );
+            }
+            Job::File(FileOp::Delete { items, .. }) => v.extend(items.iter().cloned()),
+            Job::File(FileOp::Rename { item, new_name }) => {
+                v.push(item.clone());
+                v.extend(renamed(item, new_name));
+            }
+            Job::File(FileOp::RenameMany { items }) => {
+                for (item, name) in items {
+                    v.push(item.clone());
+                    v.extend(renamed(item, name));
+                }
+            }
+            Job::File(FileOp::MoveRenamed { items }) => {
+                for (item, dir, name) in items {
+                    v.push(item.clone());
+                    v.push(dir.join(name));
+                }
+            }
+            Job::File(FileOp::NewFolder { parent, name } | FileOp::NewFile { parent, name }) => {
+                v.push(parent.join(name));
+            }
+            Job::Compress { dest, .. } | Job::Extract { dest, .. } => v.push(dest.clone()),
+            Job::RestoreRecycled(items) => v.extend(items.iter().map(|r| r.original.clone())),
+            Job::PurgeRecycled(_) => {}
+        }
+        for (from, to) in &self.moved {
+            v.push(from.clone());
+            v.push(to.clone());
+        }
+        v.extend(self.created.iter().cloned());
+        v
+    }
+
     /// Opérations inverses, si l'opération est annulable.
     pub(crate) fn inverse(&self) -> Option<Vec<Job>> {
         let jobs: Vec<Job> = match &self.job {

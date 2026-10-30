@@ -12,4 +12,4 @@ pub mod watch;
 pub use enumerate::{EnumOptions, EnumStats, Outcome, enumerate};
 pub use fx_win::Error;
 pub use search::{SearchStats, search};
-pub use watch::{Change, DirEvent, WatchService};
+pub use watch::{Change, DirEvent, WatchService, restat};

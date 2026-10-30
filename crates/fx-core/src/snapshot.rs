@@ -210,11 +210,27 @@ impl DirSnapshot {
         let existing = self.find(&bytes);
         let id = match existing {
             Some(id) => {
+                let cur = self.entries[id as usize];
+                let same_name = self.names.get(cur.name) == bytes.as_slice();
+                // Changement déjà appliqué (surveillance puis relecture après une opération) :
+                // rien à faire, ni décalage O(n) de l'ordre.
+                if same_name
+                    && cur.attributes == attributes
+                    && cur.size == size
+                    && cur.created == created
+                    && cur.modified == modified
+                {
+                    return id;
+                }
                 if let Some(pos) = self.order.iter().position(|&x| x == id) {
                     self.order.remove(pos);
                 }
-                let mut old = self.entries[id as usize];
+                let mut old = cur;
                 self.account(&mut old, false);
+                // Renommage qui ne change que la casse : le nom affiché suit.
+                if !same_name {
+                    self.entries[id as usize].name = self.names.push_bytes(&bytes);
+                }
                 let e = &mut self.entries[id as usize];
                 e.attributes = attributes;
                 e.size = size;
@@ -531,10 +547,16 @@ mod tests {
         assert_eq!(s.total(), 3, "mise à jour, pas d'ajout");
         assert_eq!(s.view(id).meta.size, 7);
         assert_eq!(s.stats().file_bytes, 9);
+        assert_eq!(
+            names(&s),
+            ["b.txt", "C.TXT", "d.txt"],
+            "casse du nom notifié"
+        );
+        assert_eq!(s.upsert(&w("C.TXT"), 0, 7, 0, 0), id, "déjà à jour");
         s.upsert(&w("a"), attrs::DIRECTORY, 0, 0, 0);
-        assert_eq!(names(&s), ["a", "b.txt", "c.txt", "d.txt"]);
+        assert_eq!(names(&s), ["a", "b.txt", "C.TXT", "d.txt"]);
         assert!(s.remove(b"b.TXT").is_some());
-        assert_eq!(names(&s), ["a", "c.txt", "d.txt"]);
+        assert_eq!(names(&s), ["a", "C.TXT", "d.txt"]);
         assert_eq!(
             s.stats(),
             DirStats {

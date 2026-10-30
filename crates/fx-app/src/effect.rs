@@ -140,6 +140,21 @@ pub enum Effect {
         pane: PaneId,
         dir: PathBuf,
     },
+    /// Branches du dépôt Git contenant `dir` (menu de la barre d'état).
+    ListGitBranches {
+        pane: PaneId,
+        dir: PathBuf,
+    },
+    /// Active une branche (`git switch`) dans le dépôt contenant `dir`.
+    SwitchGitBranch {
+        pane: PaneId,
+        dir: PathBuf,
+        branch: String,
+    },
+    /// Relit l'état de chemins touchés par une opération terminée (cf. `fx_fs::restat`).
+    Restat {
+        paths: Vec<PathBuf>,
+    },
     Persist(Persist),
     /// Nouvelle fenêtre (processus `folder.exe`) ouverte sur `start` (cf.
     /// [`crate::Location::window_arg`]) ; `rect` : placement imposé en pixels physiques

@@ -358,8 +358,29 @@ impl Scheduler {
                 self.io(move || out.send(Msg::PreviewLoaded(fx_preview::build(&path))))
             }
             Effect::DetectGit { pane, dir } => self.io(move || {
-                let branch = git_branch(&dir);
+                let branch = crate::git::branch(&dir);
                 out.send(Msg::GitBranch { pane, dir, branch });
+            }),
+            Effect::ListGitBranches { pane, dir } => self.io(move || {
+                let result = crate::git::branches(&dir);
+                out.send(Msg::GitBranchesLoaded { pane, dir, result });
+            }),
+            // Thread à part : un changement de branche peut réécrire beaucoup de fichiers.
+            Effect::SwitchGitBranch { pane, dir, branch } => spawn_temp("fx-git", move || {
+                let result = crate::git::switch(&dir, &branch);
+                out.send(Msg::GitSwitched {
+                    pane,
+                    dir,
+                    branch,
+                    result,
+                });
+            }),
+            Effect::Restat { paths } => self.io(move || {
+                for (dir, changes) in fx_fs::restat(&paths) {
+                    if !changes.is_empty() {
+                        out.send(Msg::PathsChanged { dir, changes });
+                    }
+                }
             }),
             Effect::Persist(p) => {
                 let (paths, db) = (self.paths.clone(), self.db.clone());
@@ -736,38 +757,6 @@ fn recent_items() -> Vec<RecentItem> {
     items
 }
 
-/// Branche Git du dépôt contenant `dir` (lecture de `.git/HEAD`, sans dépendance Git).
-fn git_branch(dir: &Path) -> Option<String> {
-    let mut cur = Some(dir);
-    while let Some(d) = cur {
-        let git = d.join(".git");
-        let head = if git.is_dir() {
-            std::fs::read_to_string(git.join("HEAD")).ok()
-        } else if git.is_file() {
-            // Sous-module ou worktree : « gitdir: <chemin> ».
-            let link = std::fs::read_to_string(&git).ok()?;
-            let target = link.strip_prefix("gitdir:")?.trim();
-            let target = if Path::new(target).is_absolute() {
-                PathBuf::from(target)
-            } else {
-                d.join(target)
-            };
-            std::fs::read_to_string(target.join("HEAD")).ok()
-        } else {
-            None
-        };
-        if let Some(h) = head {
-            let h = h.trim();
-            return Some(match h.strip_prefix("ref: refs/heads/") {
-                Some(b) => b.to_owned(),
-                None => h.chars().take(7).collect(),
-            });
-        }
-        cur = d.parent();
-    }
-    None
-}
-
 fn spawn_worker(name: String, rx: Receiver<Task>) -> std::io::Result<()> {
     thread::Builder::new()
         .name(name)
@@ -802,20 +791,6 @@ fn spawn_temp(name: &str, f: impl FnOnce() + Send + 'static) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn git_branch_from_head() {
-        let d = std::env::temp_dir().join(format!("fx-git-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(d.join(".git")).expect("mkdir");
-        std::fs::create_dir_all(d.join("src").join("deep")).expect("mkdir");
-        std::fs::write(d.join(".git").join("HEAD"), "ref: refs/heads/feature/x\n").expect("w");
-        assert_eq!(
-            git_branch(&d.join("src").join("deep")).as_deref(),
-            Some("feature/x")
-        );
-        let _ = std::fs::remove_dir_all(&d);
-    }
 
     /// Deux fenêtres (deux processus) sur la même base : l'historique des opérations est
     /// partagé, chaque écriture répond par l'historique à jour.

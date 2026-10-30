@@ -10,6 +10,8 @@ use crate::theme::{glyph, icon_font};
 use crate::widgets;
 
 pub fn draw_bar(ui: &mut Ui, f: &mut Fx<'_>) {
+    // Ancre du menu Git : recalculée à chaque image (aucune si le bouton est absent).
+    f.vs.git_anchor = None;
     let pal = f.pal;
     egui::Panel::bottom("status")
         .exact_size(30.0)
@@ -67,14 +69,6 @@ pub fn draw_bar(ui: &mut Ui, f: &mut Fx<'_>) {
                         ui.add(egui::Spinner::new().size(12.0));
                     }
                 }
-                if let Some(b) = &pane.git_branch {
-                    ui.label(
-                        RichText::new(glyph::BRANCH)
-                            .font(icon_font(11.0))
-                            .color(pal.text2),
-                    );
-                    ui.label(small(b.clone()));
-                }
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -104,6 +98,13 @@ pub fn draw_bar(ui: &mut Ui, f: &mut Fx<'_>) {
                         }
                     }
                     ui.add_space(8.0);
+                    // Dépôt Git : branche active, menu pour en changer.
+                    if let Some(b) = f.state.pane().git_branch.clone() {
+                        widgets::vsep(ui, &pal);
+                        ui.add_space(2.0);
+                        super::gitmenu::button(ui, f, &b);
+                        ui.add_space(4.0);
+                    }
                     if f.state.settings.show_hidden {
                         ui.label(
                             RichText::new(glyph::HIDDEN)

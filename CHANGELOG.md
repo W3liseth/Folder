@@ -5,6 +5,20 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.8.0 — 2026-10-30
+
+- Branche Git dans la barre d'état : dans un dépôt Git, le logo Git et la branche active
+  s'affichent en bas à droite. Un clic ouvre la liste des branches (locales, puis
+  distantes sans branche locale) et en active une autre ; un filtre apparaît quand il y en
+  a beaucoup. Aussi depuis la palette de commandes ou Ctrl + Maj + B (« Changer de branche
+  Git »). Nécessite Git pour Windows ; aucun accès au réseau (pas de fetch ni de pull).
+- Extraction, renommage, création, copie, déplacement et suppression : le résultat apparaît
+  aussitôt dans la liste, même sur les lecteurs qui ne signalent pas leurs changements
+  (Google Drive, certains lecteurs réseau) ; plus besoin d'actualiser.
+- Renommage qui ne change que les majuscules (« rapport » en « Rapport ») : le nouveau nom
+  s'affiche.
+- Centre d'état plus grand (plus large et plus haut).
+
 ## 0.7.0 — 2026-10-29
 
 - Centre d'état : un bouton à côté de Rechercher et de la palette de commandes remplace

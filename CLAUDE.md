@@ -97,7 +97,7 @@ avec pour description sa section de `CHANGELOG.md` : tout changement de version 
 vérifié par `cargo test`) :
 
 ```bash
-iscc /DAppVersion=0.7.0 installer/folder.iss
+iscc /DAppVersion=0.8.0 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :
@@ -124,7 +124,7 @@ Les deux moteurs coexistent : **rendu CPU par défaut**, `--renderer glow` en op
 | `fx-commands` | métadonnées des commandes (macro `commands!`), raccourcis | toute action utilisateur a un `CommandId` |
 | `fx-store` | réglages TOML, session, SQLite (étiquettes, préférences par dossier) | écritures hors thread UI |
 | `fx-preview` | aperçus texte/code, markdown, infos | chargé seulement si le volet est ouvert |
-| `fx-app` | `AppState`, `Msg`, `update`, `Effect`, scheduler, historique, opérations, mise à jour et notes de version (`upgrade`) | `update` pur, < 1 ms |
+| `fx-app` | `AppState`, `Msg`, `update`, `Effect`, scheduler, historique, opérations, mise à jour et notes de version (`upgrade`), branches Git (`git`, programme `git` de l'utilisateur) | `update` pur, < 1 ms |
 | `fx-ui` | rendu egui, thème, caches de textures ; fenêtres Propriétés (`props_window`, processus `--properties`) et Paramètres (`settings_window`, processus `--settings`, modifications envoyées par `WM_COPYDATA`) | lit l'état, émet des `Msg` ; n'appelle `fx-win` que pour les exceptions ci-dessus (la fenêtre Propriétés, mini-application à part, lit ses données sur ses propres threads) |
 | `app/folder` | binaire, manifeste, ressources | |
 | `vendor/egui_software_backend` | rasteriseur CPU tiers (porté vers egui 0.37) | hors lints du workspace, modifications minimales |

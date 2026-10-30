@@ -81,6 +81,8 @@ pub struct Pane {
     pub active_column: usize,
     /// Branche Git du dossier affiché, s'il est dans un dépôt.
     pub git_branch: Option<String>,
+    /// Branche en cours d'activation (`git switch` lancé).
+    pub git_switching: Option<String>,
     /// Résumé de la dernière recherche (« 120 résultats dans 34 dossiers »).
     pub search_summary: Option<String>,
     /// Corbeille : élément réel (`$R…`) de chaque entrée affichée (par identifiant).
@@ -107,6 +109,7 @@ impl Pane {
             columns: Vec::new(),
             active_column: 0,
             git_branch: None,
+            git_switching: None,
             search_summary: None,
             recycled: HashMap::new(),
             shell_items: HashMap::new(),
@@ -306,6 +309,15 @@ pub enum ToastKind {
     Error,
 }
 
+/// Menu des branches du dépôt affiché par un volet.
+#[derive(Debug, Clone)]
+pub struct GitMenu {
+    pub pane: PaneId,
+    pub dir: PathBuf,
+    /// `None` : lecture en cours.
+    pub branches: Option<Result<crate::git::GitBranches, String>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Toast {
     pub id: u64,
@@ -390,6 +402,8 @@ pub struct AppState {
     /// Centre d'état (bouton à côté de Rechercher et de la palette).
     pub show_status_center: bool,
     pub show_diagnostics: bool,
+    /// Menu des branches Git (bouton de la barre d'état).
+    pub git_menu: Option<GitMenu>,
     /// Mise à jour : dernière vérification connue, installeur prêt.
     pub update: crate::upgrade::Status,
     pub requests: UiRequests,
@@ -430,6 +444,7 @@ impl AppState {
             show_search: false,
             show_status_center: false,
             show_diagnostics: false,
+            git_menu: None,
             update: crate::upgrade::Status::Unknown,
             requests: UiRequests::default(),
             next_id: 1,
@@ -550,6 +565,7 @@ impl AppState {
             in_recycle_bin: matches!(pane.location(), Location::RecycleBin),
             update_ready: self.update.ready_version().is_some(),
             has_op_history: !self.op_history.is_empty(),
+            git_repo: pane.git_branch.is_some(),
         }
     }
 

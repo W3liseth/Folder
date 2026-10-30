@@ -129,7 +129,7 @@ Ces budgets sont des **exigences**. Toute régression est un bug.
 | Concurrence | `std::thread` + `crossbeam-channel` | **Pas de tokio** : pas besoin d'I/O réseau massive ; moins de threads et de mémoire. |
 | Persistance | `serde` + `toml` (réglages), `rusqlite` feature `bundled` (étiquettes, préférences par dossier) | Simple, robuste, compact. |
 | Archives | `zip` (compression/extraction, implémenté) ; `sevenz-rust2` (7z) et RAR via `unrar` optionnel plus tard | Pas de `7z64.dll` obligatoire. |
-| Git | aujourd'hui : branche lue dans `.git/HEAD` (aucune dépendance) ; `gix` (pur Rust) pour statut/opérations en phase 3 | Pas de dépendance C obligatoire. |
+| Git | branche active lue dans `.git/HEAD` (aucune dépendance) ; liste des branches et changement de branche par le programme `git` de l'utilisateur (`fx-app::git`, sans console, jamais de commande réseau) ; `gix` (pur Rust) envisagé pour statut/opérations en phase 3 | Pas de dépendance C ni de bibliothèque Git embarquée : `git switch` gère seul références compactées, worktrees et arbre de travail. |
 | Markdown | `pulldown-cmark` rendu dans egui (pas de WebView) | Exigence « pas de JS ». |
 | Allocateur | allocateur système + **Segment Heap** activé via le manifeste | Réduit l'empreinte sur Windows 10 2004+. |
 
@@ -496,6 +496,12 @@ dans les chemins chauds.
 - Événements regroupés (**debounce 50 ms**) puis appliqués comme diff sur le `DirSnapshot`
   (insert/remove/update + renommage old→new), sans recharger le dossier.
 - Désabonnement immédiat quand le volet quitte le dossier.
+- Les opérations de folder ne dépendent pas de la surveillance : à leur fin, les chemins
+  touchés (sources, destinations, éléments créés, archive extraite) situés dans un dossier
+  affiché sont relus (`fx_fs::restat`, pool d'I/O) et appliqués comme les notifications.
+  Certains lecteurs virtuels (Google Drive) ou réseau ne signalent rien ; ailleurs, la
+  relecture retrouve l'état déjà appliqué et `DirSnapshot::upsert` l'ignore (pas de
+  décalage O(n)).
 
 ### 7.3 Opérations sur fichiers (`fx-fs::ops`)
 
@@ -808,7 +814,7 @@ télémétrie distante.
   avec la corbeille, lecteurs, réseau, distributions WSL lues dans le registre, étiquettes ;
   icônes de Windows), restauration de session (onglets, dossiers ouverts,
   écran, taille et état agrandi de la fenêtre : créée cachée, placée par
-  `SetWindowPlacement` en pixels physiques puis affichée directement dans son état final), branche Git dans la barre d'état.
+  `SetWindowPlacement` en pixels physiques puis affichée directement dans son état final), branche Git en bas à droite de la barre d'état (logo, menu des branches locales et distantes, changement de branche par `git switch` sur un thread temporaire, dossier relu ensuite).
 - **Vues** : Détails (colonnes ancrées à gauche comme l'Explorateur : chaque séparateur ne
   redimensionne que la colonne à sa gauche, Nom automatique jusqu'au premier redimensionnement,
   colonnes coupées au bord plutôt que masquées ; séparateurs créés après les en-têtes et

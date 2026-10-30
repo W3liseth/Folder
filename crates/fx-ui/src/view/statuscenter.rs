@@ -98,7 +98,9 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
             vec2(36.0, 34.0),
         )
     });
-    let max_h = (screen.bottom() - anchor.bottom() - 90.0).clamp(160.0, 520.0);
+    // Grand panneau (titres de chemins longs, historique) borné par la fenêtre.
+    let width = (screen.width() - 32.0).clamp(320.0, 540.0);
+    let max_h = (screen.bottom() - anchor.bottom() - 80.0).clamp(200.0, 760.0);
     let area = Area::new(Id::unique("status-center"))
         .order(Order::Foreground)
         .fixed_pos(pos2(anchor.right(), anchor.bottom() + 6.0))
@@ -106,7 +108,7 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
         .show(ctx, |ui| {
             widgets::menu_appear(ui);
             Frame::popup(ui.style()).inner_margin(14).show(ui, |ui| {
-                ui.set_width(400.0);
+                ui.set_width(width);
                 header(ui, f);
                 ui.add_space(8.0);
                 let running = &f.state.ops;

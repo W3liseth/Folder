@@ -158,6 +158,39 @@ fn run(port: &Port, cmds: &Receiver<Cmd>, deliver: &dyn Fn(DirEvent)) {
     }
 }
 
+/// État actuel de `paths`, regroupés par dossier parent.
+///
+/// Sert à la fin d'une opération lancée par folder : la liste suit le résultat même sans
+/// notification du système de fichiers (certains lecteurs virtuels, comme Google Drive, n'en
+/// envoient pas). Appel bloquant (un `stat` par chemin) : hors du thread UI.
+pub fn restat(paths: &[PathBuf]) -> Vec<(PathBuf, Vec<Change>)> {
+    use std::os::windows::ffi::OsStrExt;
+    type Names = Vec<(Action, Vec<u16>)>;
+    let mut groups: Vec<(PathBuf, Names)> = Vec::new();
+    for p in paths {
+        let (Some(dir), Some(name)) = (p.parent(), p.file_name()) else {
+            continue;
+        };
+        let i = match groups.iter().position(|(d, _)| d == dir) {
+            Some(i) => i,
+            None => {
+                groups.push((dir.to_path_buf(), Vec::new()));
+                groups.len() - 1
+            }
+        };
+        groups[i]
+            .1
+            .push((Action::Modified, name.encode_wide().collect()));
+    }
+    groups
+        .into_iter()
+        .map(|(dir, events)| {
+            let changes = coalesce(&dir, events, false);
+            (dir, changes)
+        })
+        .collect()
+}
+
 /// Réduit une rafale de notifications à un changement final par nom.
 fn coalesce(dir: &Path, events: Vec<(Action, Vec<u16>)>, rescan: bool) -> Vec<Change> {
     if rescan {
@@ -231,6 +264,33 @@ mod tests {
         assert_eq!(new.map(|s| s.size), Some(3), "{changes:?}");
         assert!(!changes.iter().any(|c| matches!(c, Change::Upsert { name, .. } if String::from_utf16_lossy(name) == "gone.txt")));
         svc.unwatch(3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restat_reports_current_state_by_parent() {
+        let dir = std::env::temp_dir().join(format!("fx-restat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).expect("mkdir");
+        std::fs::write(dir.join("new.txt"), b"abcd").expect("write");
+        let got = restat(&[
+            dir.join("old.txt"),
+            dir.join("new.txt"),
+            dir.join("sub"),
+            dir.join("sub").join("gone"),
+        ]);
+        let w = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].0, dir);
+        let c = &got[0].1;
+        assert_eq!(c[0], Change::Remove { name: w("old.txt") });
+        assert!(
+            matches!(&c[1], Change::Upsert { name, stat } if *name == w("new.txt") && stat.size == 4)
+        );
+        assert!(
+            matches!(&c[2], Change::Upsert { name, stat } if *name == w("sub") && stat.attributes & 0x10 != 0)
+        );
+        assert_eq!(got[1].1, vec![Change::Remove { name: w("gone") }]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

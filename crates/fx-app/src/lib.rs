@@ -6,6 +6,7 @@
 //! reviennent sous forme de `Msg`.
 
 pub mod effect;
+pub mod git;
 pub mod history;
 pub mod msg;
 pub mod ops;

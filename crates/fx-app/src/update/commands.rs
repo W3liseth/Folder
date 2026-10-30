@@ -63,12 +63,14 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
         Search => {
             state.show_search = !state.show_search;
             state.show_palette = false;
+            state.git_menu = None;
             state.show_status_center = false;
             vec![]
         }
         CommandPalette => {
             state.show_palette = !state.show_palette;
             state.show_search = false;
+            state.git_menu = None;
             state.show_status_center = false;
             vec![]
         }
@@ -76,6 +78,7 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.show_status_center = !state.show_status_center;
             state.show_search = false;
             state.show_palette = false;
+            state.git_menu = None;
             if state.show_status_center {
                 state.op_history.mark_seen();
                 // Les autres fenêtres ont pu compléter ou effacer l'historique.
@@ -83,6 +86,25 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             } else {
                 vec![]
             }
+        }
+        GitBranches => {
+            if state.git_menu.take().is_some() {
+                return vec![];
+            }
+            let pane = state.pane();
+            let (Some(_), Some(dir)) = (&pane.git_branch, pane.location().dir()) else {
+                return vec![];
+            };
+            let (pane, dir) = (pane.id, dir.to_path_buf());
+            state.show_palette = false;
+            state.show_search = false;
+            state.show_status_center = false;
+            state.git_menu = Some(crate::state::GitMenu {
+                pane,
+                dir: dir.clone(),
+                branches: None,
+            });
+            vec![Effect::ListGitBranches { pane, dir }]
         }
         ClearOperationHistory => {
             state.op_history.clear();

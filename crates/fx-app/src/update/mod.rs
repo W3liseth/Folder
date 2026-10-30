@@ -13,7 +13,7 @@ use fx_store::FolderPrefs;
 use crate::effect::{Effect, Persist};
 use crate::history::Location;
 use crate::msg::Msg;
-use crate::state::{AppState, sort_key_id};
+use crate::state::{AppState, ToastKind, sort_key_id};
 
 pub use edit::drop_copies;
 pub use nav::sort_indicator;
@@ -239,6 +239,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             state.show_palette = false;
             state.show_search = false;
             state.show_status_center = false;
+            state.git_menu = None;
             vec![]
         }
 
@@ -261,6 +262,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             results::column_finished(state, pane, generation)
         }
         Msg::DirChanged(ev) => results::dir_changed(state, ev),
+        Msg::PathsChanged { dir, changes } => results::paths_changed(state, &dir, &changes),
         Msg::SearchFinished {
             pane,
             generation,
@@ -297,6 +299,71 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
                 p.git_branch = branch;
             }
             vec![]
+        }
+        Msg::GitBranchesLoaded { pane, dir, result } => {
+            if let Ok(b) = &result
+                && let Some(current) = &b.current
+                && let Some(p) = state.find_pane_mut(pane)
+                && p.location().dir() == Some(dir.as_path())
+            {
+                // Branche changée hors de folder depuis l'ouverture du dossier.
+                p.git_branch = Some(current.clone());
+            }
+            if let Some(m) = &mut state.git_menu
+                && m.pane == pane
+                && m.dir == dir
+            {
+                m.branches = Some(result);
+            }
+            vec![]
+        }
+        Msg::SwitchGitBranch(branch) => {
+            let Some(m) = state.git_menu.take() else {
+                return vec![];
+            };
+            let Some(p) = state.find_pane_mut(m.pane) else {
+                return vec![];
+            };
+            if p.git_switching.is_some() || p.git_branch.as_deref() == Some(branch.as_str()) {
+                return vec![];
+            }
+            p.git_switching = Some(branch.clone());
+            vec![Effect::SwitchGitBranch {
+                pane: m.pane,
+                dir: m.dir,
+                branch,
+            }]
+        }
+        Msg::GitSwitched {
+            pane,
+            dir,
+            branch,
+            result,
+        } => {
+            let shown = state.find_pane_mut(pane).is_some_and(|p| {
+                p.git_switching = None;
+                p.location().dir() == Some(dir.as_path())
+            });
+            match result {
+                Ok(()) => {
+                    state.toast(format!("Branche « {branch} » activée"), ToastKind::Success);
+                    if !shown {
+                        return vec![];
+                    }
+                    if let Some(p) = state.find_pane_mut(pane) {
+                        p.git_branch = Some(branch);
+                    }
+                    // Les fichiers du dossier ont pu changer : relecture (sélection gardée).
+                    nav::load(state, pane, Location::Dir(dir), false)
+                }
+                Err(e) => {
+                    state.toast(
+                        format!("Impossible d'activer « {branch} » : {e}"),
+                        ToastKind::Error,
+                    );
+                    vec![]
+                }
+            }
         }
         Msg::TagSaved(tag) => {
             match state.tags.list.iter_mut().find(|t| t.id == tag.id) {

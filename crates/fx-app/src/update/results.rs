@@ -162,31 +162,59 @@ pub fn column_finished(state: &mut AppState, pane: PaneId, generation: u64) -> V
 
 pub fn dir_changed(state: &mut AppState, ev: DirEvent) -> Vec<Effect> {
     let pane = PaneId(ev.key);
-    let show_hidden = state.settings.show_hidden;
-    let Some(p) = state.find_pane_mut(pane) else {
-        return vec![];
-    };
-    let Location::Dir(dir) = p.location().clone() else {
-        return vec![];
-    };
     if ev.changes.contains(&Change::Rescan) {
+        let Some(Location::Dir(dir)) = state.find_pane(pane).map(|p| p.location().clone()) else {
+            return vec![];
+        };
         return nav::load(state, pane, Location::Dir(dir), false);
     }
-    let Some(l) = p.listing.as_mut().filter(|l| l.location() == dir.as_path()) else {
-        return vec![];
+    apply_changes(state, pane, &ev.changes);
+    vec![]
+}
+
+/// État relu après une opération : appliqué à chaque volet qui affiche `dir`.
+pub fn paths_changed(state: &mut AppState, dir: &Path, changes: &[Change]) -> Vec<Effect> {
+    let panes: Vec<PaneId> = state
+        .tabs
+        .iter()
+        .flat_map(|t| &t.panes)
+        .filter(|p| matches!(p.location(), Location::Dir(d) if same_dir(d, dir)))
+        .map(|p| p.id)
+        .collect();
+    for pane in panes {
+        apply_changes(state, pane, changes);
+    }
+    vec![]
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+}
+
+/// Applique des changements à la liste du volet `pane` (s'il affiche toujours ce dossier).
+fn apply_changes(state: &mut AppState, pane: PaneId, changes: &[Change]) {
+    let show_hidden = state.settings.show_hidden;
+    let Some(p) = state.find_pane_mut(pane) else {
+        return;
     };
-    for c in ev.changes {
+    let Location::Dir(dir) = p.location().clone() else {
+        return;
+    };
+    let Some(l) = p.listing.as_mut().filter(|l| l.location() == dir.as_path()) else {
+        return;
+    };
+    for c in changes {
         match c {
             Change::Upsert { name, stat } => {
                 if !show_hidden && stat.attributes & attrs::HIDDEN != 0 {
                     let mut b = Vec::new();
-                    wtf8::push_utf16(&mut b, &name);
+                    wtf8::push_utf16(&mut b, name);
                     if let Some(id) = l.remove(&b) {
                         p.selection.set(id, false);
                     }
                 } else {
                     l.upsert(
-                        &name,
+                        name,
                         stat.attributes,
                         stat.size,
                         stat.created,
@@ -196,7 +224,7 @@ pub fn dir_changed(state: &mut AppState, ev: DirEvent) -> Vec<Effect> {
             }
             Change::Remove { name } => {
                 let mut b = Vec::new();
-                wtf8::push_utf16(&mut b, &name);
+                wtf8::push_utf16(&mut b, name);
                 if let Some(id) = l.remove(&b) {
                     p.selection.set(id, false);
                 }
@@ -205,7 +233,6 @@ pub fn dir_changed(state: &mut AppState, ev: DirEvent) -> Vec<Effect> {
         }
     }
     apply_pending(state, pane);
-    vec![]
 }
 
 /// Sélection et renommage en attente (éléments créés, collés, renommés) dès qu'ils
@@ -548,6 +575,7 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
     let mut fx = Vec::new();
     if let Some(i) = state.ops.iter().position(|o| o.id == op) {
         let o = state.ops.remove(i);
+        fx.extend(restat_effect(state, o.touched()));
         let ended = state.op_history.next_end(fx_win::time::now_filetime());
         let record = OpRecord::of(&o, ended);
         fx.push(Effect::Persist(Persist::AddOp(record.entry())));
@@ -560,6 +588,30 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
     fx.extend(reload_recycle_bins(state));
     fx.push(Effect::CheckClipboard);
     fx
+}
+
+/// Relecture des chemins touchés situés dans un dossier affiché (les autres n'ont pas de
+/// liste à mettre à jour). La surveillance fait souvent déjà ce travail : le refaire ne coûte
+/// presque rien (`DirSnapshot::upsert` ignore un état inchangé).
+fn restat_effect(state: &AppState, touched: Vec<PathBuf>) -> Option<Effect> {
+    let shown: Vec<&Path> = state
+        .tabs
+        .iter()
+        .flat_map(|t| &t.panes)
+        .filter_map(|p| match p.location() {
+            Location::Dir(d) => Some(d.as_path()),
+            _ => None,
+        })
+        .collect();
+    let mut paths: Vec<PathBuf> = touched
+        .into_iter()
+        .filter(|p| {
+            p.parent()
+                .is_some_and(|d| shown.iter().any(|s| same_dir(s, d)))
+        })
+        .collect();
+    paths.dedup();
+    (!paths.is_empty()).then_some(Effect::Restat { paths })
 }
 
 /// Dossiers connus chargés ; au premier lancement, ils deviennent les épingles par défaut.

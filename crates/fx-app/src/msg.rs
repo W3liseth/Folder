@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use fx_commands::CommandId;
 use fx_core::{Batch, SortKey};
 use fx_fs::recycle::Recycled;
-use fx_fs::{DirEvent, Outcome, SearchStats};
+use fx_fs::{Change, DirEvent, Outcome, SearchStats};
+
+use crate::git::GitBranches;
 use fx_preview::Preview;
 use fx_store::{Layout, Settings, Tag, TagId};
 use fx_win::fileop::OpEvent;
@@ -174,6 +176,11 @@ pub enum Msg {
         generation: u64,
     },
     DirChanged(DirEvent),
+    /// État relu d'éléments de `dir` après une opération (cf. [`crate::Effect::Restat`]).
+    PathsChanged {
+        dir: PathBuf,
+        changes: Vec<Change>,
+    },
     SearchFinished {
         pane: PaneId,
         generation: u64,
@@ -203,6 +210,19 @@ pub enum Msg {
         pane: PaneId,
         dir: PathBuf,
         branch: Option<String>,
+    },
+    GitBranchesLoaded {
+        pane: PaneId,
+        dir: PathBuf,
+        result: Result<GitBranches, String>,
+    },
+    /// Choix d'une branche dans le menu Git (nom passé à `git switch`).
+    SwitchGitBranch(String),
+    GitSwitched {
+        pane: PaneId,
+        dir: PathBuf,
+        branch: String,
+        result: Result<(), String>,
     },
     TagSaved(Tag),
     RecycleBinLoaded {

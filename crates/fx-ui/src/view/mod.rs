@@ -9,6 +9,7 @@ mod columns;
 mod diagnostics;
 mod dialogs;
 mod dnd;
+mod gitmenu;
 mod grid;
 mod home;
 mod items;
@@ -109,6 +110,10 @@ pub struct ViewState {
     pub(crate) fallbacks: theme::Fallbacks,
     /// Bouton du centre d'état à l'image courante (ancre de son menu).
     pub(crate) status_anchor: Option<egui::Rect>,
+    /// Bouton de la branche Git à l'image courante (ancre de son menu) et filtre du menu.
+    pub(crate) git_anchor: Option<egui::Rect>,
+    pub(crate) git_filter: String,
+    pub(crate) git_menu_h: f32,
     /// Emplacement actif à l'image précédente (abandon des icônes en attente au changement).
     pub(crate) last_location: Option<Location>,
     pub(crate) diag: diagnostics::Sample,
@@ -159,6 +164,9 @@ impl ViewState {
             styled_dark: None,
             fallbacks: theme::Fallbacks::default(),
             status_anchor: None,
+            git_anchor: None,
+            git_filter: String::new(),
+            git_menu_h: 0.0,
             last_location: None,
             diag: diagnostics::Sample::default(),
             dont_ask_delete: false,
@@ -308,6 +316,7 @@ pub fn draw(
         .show(ui, |ui| pane::draw_tab(ui, &mut f));
 
     statuscenter::draw(&ctx, &mut f);
+    gitmenu::draw(&ctx, &mut f);
     toasts::draw(&ctx, &mut f);
     dialogs::draw(&ctx, &mut f);
     palette::draw(&ctx, &mut f);
@@ -392,13 +401,20 @@ fn keyboard(ctx: &egui::Context, f: &mut Fx<'_>) {
         return; // l'éditeur de raccourcis capture la prochaine touche
     }
     let typing = ctx.egui_wants_keyboard_input();
-    let overlays = f.state.dialog.is_some() || f.state.show_palette || f.state.show_search;
+    let overlays = f.state.dialog.is_some()
+        || f.state.show_palette
+        || f.state.show_search
+        || f.state.git_menu.is_some();
     for hk in crate::keys::pressed(ctx) {
         if typing && crate::keys::conflicts_with_typing(&hk) {
             continue;
         }
         if hk.key == Key::Escape {
-            if f.state.show_palette || f.state.show_search || f.state.show_status_center {
+            if f.state.show_palette
+                || f.state.show_search
+                || f.state.show_status_center
+                || f.state.git_menu.is_some()
+            {
                 f.send(Msg::CloseOverlays);
                 continue;
             }

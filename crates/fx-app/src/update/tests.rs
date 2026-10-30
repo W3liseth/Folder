@@ -1224,3 +1224,189 @@ fn enabling_auto_update_checks_and_notes_open_settings() {
         [Effect::SettingsWindow { notes: true }]
     ));
 }
+
+#[test]
+fn finished_rename_rereads_items_without_watch_notification() {
+    // Lecteurs virtuels (Google Drive…) : aucune notification ; la fin de l'opération suffit.
+    let mut s = state();
+    open(&mut s, r"G:\a", &[("old.txt", false), ("z.txt", false)]);
+    let p = pane(&s);
+    let id = s
+        .find_pane_mut(p)
+        .and_then(|p| p.listing.as_mut())
+        .and_then(|l| l.find(b"old.txt"))
+        .expect("id");
+    let p = pane(&s);
+    let fx = update(
+        &mut s,
+        Msg::CommitRename {
+            pane: p,
+            id,
+            name: "new.txt".into(),
+        },
+    );
+    let op = op_id(&fx);
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    let paths = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Restat { paths } => Some(paths.clone()),
+            _ => None,
+        })
+        .expect("relecture");
+    assert_eq!(
+        paths,
+        [
+            PathBuf::from(r"G:\a\old.txt"),
+            PathBuf::from(r"G:\a\new.txt")
+        ]
+    );
+    let stat = Stat {
+        attributes: 0,
+        size: 1,
+        created: 0,
+        modified: 0,
+    };
+    update(
+        &mut s,
+        Msg::PathsChanged {
+            dir: r"g:\A".into(),
+            changes: vec![
+                Change::Remove {
+                    name: "old.txt".encode_utf16().collect(),
+                },
+                Change::Upsert {
+                    name: "new.txt".encode_utf16().collect(),
+                    stat,
+                },
+            ],
+        },
+    );
+    assert_eq!(names(&s), ["new.txt", "z.txt"]);
+    assert_eq!(s.pane().selected_paths(), [PathBuf::from(r"G:\a\new.txt")]);
+}
+
+#[test]
+fn finished_extraction_rereads_only_items_of_shown_folders() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[("x.zip", false)]);
+    let p = pane(&s);
+    let id = s
+        .find_pane_mut(p)
+        .and_then(|p| p.listing.as_mut())
+        .and_then(|l| l.find(b"x.zip"))
+        .expect("id");
+    let p = pane(&s);
+    s.find_pane_mut(p).expect("pane").selection.set(id, true);
+    let fx = update(&mut s, Msg::Command(CommandId::ExtractHere));
+    assert!(matches!(job(&fx), Job::Extract { dest, .. } if dest == Path::new(r"C:\a\x")));
+    let op = op_id(&fx);
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Restat { paths } if paths == &[PathBuf::from(r"C:\a\x")]))
+    );
+    // Dossier qui n'est plus affiché : rien à relire.
+    open(&mut s, r"C:\b", &[]);
+    let fx = update(&mut s, Msg::Command(CommandId::NewFolder));
+    let op = op_id(&fx);
+    open(&mut s, r"C:\c", &[]);
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Restat { .. })));
+}
+
+#[test]
+fn git_menu_lists_branches_and_switches() {
+    let mut s = state();
+    open(&mut s, r"C:\repo", &[("a.txt", false)]);
+    let p = pane(&s);
+    assert!(!s.command_context().git_repo);
+    assert!(update(&mut s, Msg::Command(CommandId::GitBranches)).is_empty());
+    update(
+        &mut s,
+        Msg::GitBranch {
+            pane: p,
+            dir: r"C:\repo".into(),
+            branch: Some("main".into()),
+        },
+    );
+    assert!(s.command_context().git_repo);
+    let fx = update(&mut s, Msg::Command(CommandId::GitBranches));
+    assert!(
+        matches!(&fx[..], [Effect::ListGitBranches { dir, .. }] if dir == Path::new(r"C:\repo"))
+    );
+    let branches = crate::git::GitBranches {
+        current: Some("dev".into()),
+        local: vec!["dev".into(), "main".into()],
+        remote: vec!["origin/fix".into()],
+    };
+    update(
+        &mut s,
+        Msg::GitBranchesLoaded {
+            pane: p,
+            dir: r"C:\repo".into(),
+            result: Ok(branches.clone()),
+        },
+    );
+    let menu = s.git_menu.as_ref().expect("menu");
+    assert_eq!(menu.branches, Some(Ok(branches)));
+    assert_eq!(
+        s.pane().git_branch.as_deref(),
+        Some("dev"),
+        "branche changée hors de folder"
+    );
+    // Branche déjà active : rien à faire.
+    assert!(update(&mut s, Msg::SwitchGitBranch("dev".into())).is_empty());
+    assert!(s.git_menu.is_none());
+    update(&mut s, Msg::Command(CommandId::GitBranches));
+    let fx = update(&mut s, Msg::SwitchGitBranch("fix".into()));
+    assert!(matches!(&fx[..], [Effect::SwitchGitBranch { branch, .. }] if branch == "fix"));
+    assert_eq!(s.pane().git_switching.as_deref(), Some("fix"));
+    let fx = update(
+        &mut s,
+        Msg::GitSwitched {
+            pane: p,
+            dir: r"C:\repo".into(),
+            branch: "fix".into(),
+            result: Ok(()),
+        },
+    );
+    assert!(s.pane().git_switching.is_none());
+    assert_eq!(s.pane().git_branch.as_deref(), Some("fix"));
+    enum_gen(&fx);
+    // Échec (modifications locales) : message, branche inchangée.
+    update(&mut s, Msg::Command(CommandId::GitBranches));
+    update(&mut s, Msg::SwitchGitBranch("main".into()));
+    update(
+        &mut s,
+        Msg::GitSwitched {
+            pane: p,
+            dir: r"C:\repo".into(),
+            branch: "main".into(),
+            result: Err("conflit".into()),
+        },
+    );
+    assert_eq!(s.pane().git_branch.as_deref(), Some("fix"));
+    assert!(s.toasts.last().is_some_and(|t| t.text.contains("conflit")));
+    update(&mut s, Msg::Command(CommandId::GitBranches));
+    update(&mut s, Msg::CloseOverlays);
+    assert!(s.git_menu.is_none());
+}
