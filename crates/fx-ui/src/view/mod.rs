@@ -35,7 +35,7 @@ mod toasts;
 mod toolbar;
 
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Color32, CursorIcon, Frame, Pos2, ResizeDirection, Theme, ViewportCommand,
@@ -85,6 +85,9 @@ pub struct ViewState {
     pub(crate) accent: Color32,
     /// Couleur d'accentuation de Windows (quand les réglages n'en imposent pas).
     pub(crate) system_accent: Color32,
+    /// L'accent de Windows est gris : le bleu de Windows le remplace (cf.
+    /// `theme::system_accent`). Renseigné par la fenêtre Paramètres, qui l'explique.
+    pub(crate) system_accent_neutral: bool,
     pub(crate) path_edit: Option<String>,
     pub(crate) search: HashMap<PaneId, String>,
     pub(crate) scroll: HashMap<PaneId, Scroll>,
@@ -110,7 +113,23 @@ pub struct ViewState {
     pub(crate) typeahead: (String, Option<Instant>),
     pub(crate) fullscreen: bool,
     pub(crate) hwnd: Option<isize>,
+    /// Cadre DWM appliqué (mode sombre).
     pub(crate) styled_dark: Option<bool>,
+    /// Fond Acrylic de DWM allumé (il le reste pendant le fondu vers l'opaque).
+    pub(crate) backdrop: bool,
+    /// DWM a refusé le fond (avant Windows 11 22H2) : pas de nouvel essai tant qu'il reste
+    /// demandé.
+    pub(crate) backdrop_refused: bool,
+    /// Avancement du fondu, de 0 (palette opaque) à 1 (Acrylic).
+    pub(crate) acrylic_t: f32,
+    /// Cible du fondu (0 ou 1) ; `None` avant la première image (pas de fondu au lancement).
+    pub(crate) acrylic_target: Option<f32>,
+    /// Fondu en cours : valeur de départ et instant du basculement.
+    pub(crate) acrylic_fade: Option<(f32, Instant)>,
+    /// « Effets de transparence » de Windows (cf. [`refresh_system_transparency`]).
+    pub(crate) system_transparency: bool,
+    /// Dernière lecture de `system_transparency`.
+    pub(crate) transparency_read: Instant,
     pub(crate) fallbacks: theme::Fallbacks,
     /// Bouton du centre d'état à l'image courante (ancre de son menu).
     pub(crate) status_anchor: Option<egui::Rect>,
@@ -159,6 +178,7 @@ impl ViewState {
         Self {
             accent,
             system_accent: accent,
+            system_accent_neutral: false,
             path_edit: None,
             search: HashMap::new(),
             scroll: HashMap::new(),
@@ -180,6 +200,13 @@ impl ViewState {
             fullscreen: false,
             hwnd: None,
             styled_dark: None,
+            backdrop: false,
+            backdrop_refused: false,
+            acrylic_t: 0.0,
+            acrylic_target: None,
+            acrylic_fade: None,
+            system_transparency: fx_win::theme::transparency_enabled(),
+            transparency_read: Instant::now(),
             fallbacks: theme::Fallbacks::default(),
             status_anchor: None,
             git_anchor: None,
@@ -290,10 +317,17 @@ pub fn draw(
     }
     theme::apply(&ctx, state.settings.theme, vs.accent);
     vs.wheel.frame(&ctx);
-    let pal = Palette::new(ctx.theme() == Theme::Dark, vs.accent);
+    refresh_system_transparency(vs);
+    let dark = ctx.theme() == Theme::Dark;
+    style_window(
+        &ctx,
+        vs,
+        dark,
+        state.settings.acrylic && vs.system_transparency,
+    );
+    let pal = Palette::new(dark, vs.accent).with_acrylic(vs.acrylic_t);
     images.pump(&ctx);
     vs.fallbacks.apply(&ctx);
-    style_window(vs, pal.dark);
 
     let loc = state.pane().location();
     if vs.last_location.as_ref() != Some(loc) {
@@ -360,8 +394,59 @@ pub fn draw(
     f.msgs
 }
 
-/// Cadre DWM (coins arrondis, ombre, mode sombre) appliqué dès que la fenêtre existe.
-fn style_window(vs: &mut ViewState, dark: bool) {
+/// Relit les « Effets de transparence » de Windows, au plus une fois par seconde et
+/// seulement quand une image est produite (aucun réveil) : les activer dans Windows fait
+/// apparaître l'Acrylic dès le retour dans folder, sans le relancer. Lecture d'une valeur de
+/// registre de HKCU (en mémoire, quelques µs), comme `AppsUseLightTheme` pour le thème.
+pub(crate) fn refresh_system_transparency(vs: &mut ViewState) {
+    if vs.transparency_read.elapsed() >= Duration::from_secs(1) {
+        vs.transparency_read = Instant::now();
+        vs.system_transparency = fx_win::theme::transparency_enabled();
+    }
+}
+
+/// Durée du fondu entre fond opaque et Acrylic (budget des animations : ≤ 150 ms).
+const ACRYLIC_FADE: f32 = 0.15;
+
+/// Avancement du fondu vers `on`, mesuré à l'horloge. `Context::animate_bool` ne convient
+/// pas ici : il avance d'après `stable_dt`, qui vaut, après une longue pause, tout le temps
+/// écoulé depuis l'image précédente (plusieurs secondes) ; le fondu sautait alors à sa fin dès
+/// la première image. Courbe en S (départ et arrivée doux) ; repeinte demandée seulement
+/// pendant le fondu.
+fn acrylic_fade(ctx: &egui::Context, vs: &mut ViewState, on: bool) -> f32 {
+    let target = if on { 1.0 } else { 0.0 };
+    match vs.acrylic_target {
+        None => {
+            vs.acrylic_target = Some(target);
+            return target;
+        }
+        Some(prev) if prev != target => {
+            vs.acrylic_target = Some(target);
+            vs.acrylic_fade = Some((vs.acrylic_t, Instant::now()));
+        }
+        Some(_) => {}
+    }
+    let Some((from, start)) = vs.acrylic_fade else {
+        return target;
+    };
+    let k = (start.elapsed().as_secs_f32() / ACRYLIC_FADE).min(1.0);
+    if k >= 1.0 {
+        vs.acrylic_fade = None;
+        return target;
+    }
+    ctx.request_repaint();
+    let eased = k * k * (3.0 - 2.0 * k);
+    from + (target - from) * eased
+}
+
+/// Cadre DWM (coins arrondis, ombre, mode sombre, fond Acrylic) appliqué dès que la
+/// fenêtre existe, et fondu de la palette quand l'Acrylic est activé ou coupé.
+///
+/// Le fond de DWM s'allume dès qu'il est demandé, sous une palette encore opaque (rien ne
+/// change à l'écran), puis la palette se fond vers ses couches translucides ; à l'inverse, il
+/// ne s'éteint qu'une fois la palette redevenue opaque. Basculer le fond de DWM d'un coup
+/// sous une palette translucide ferait clignoter toute la fenêtre.
+fn style_window(ctx: &egui::Context, vs: &mut ViewState, dark: bool, want: bool) {
     if vs.hwnd.is_none() {
         vs.hwnd = fx_win::window::main_window(crate::WINDOW_TITLE);
         fx_win::window::init_ole();
@@ -369,12 +454,34 @@ fn style_window(vs: &mut ViewState, dark: bool) {
             fx_win::window::set_app_icon(h);
         }
     }
-    if let Some(h) = vs.hwnd
-        && vs.styled_dark != Some(dark)
-    {
-        fx_win::window::style_frame(h, dark);
+    let Some(h) = vs.hwnd else {
+        // Rendu hors écran (bancs) : pas de fenêtre ni de fondu, `offscreen` fixe le fond.
+        vs.acrylic_t = if vs.backdrop { 1.0 } else { 0.0 };
+        return;
+    };
+    if !want {
+        vs.backdrop_refused = false;
+    }
+    if want && !vs.backdrop && !vs.backdrop_refused {
+        vs.backdrop = fx_win::window::style_frame(h, dark, true);
+        vs.backdrop_refused = !vs.backdrop;
         vs.styled_dark = Some(dark);
     }
+    let t = acrylic_fade(ctx, vs, want && vs.backdrop);
+    if vs.backdrop && !want && t <= 0.0 {
+        fx_win::window::style_frame(h, dark, false);
+        vs.backdrop = false;
+        vs.styled_dark = Some(dark);
+    }
+    if vs.styled_dark != Some(dark) {
+        fx_win::window::style_frame(h, dark, vs.backdrop);
+        vs.styled_dark = Some(dark);
+    }
+    vs.acrylic_t = t;
+    // Rendu CPU : sous un fond translucide, chaque zone redessinée doit repartir d'un pixel
+    // transparent (sinon les couches translucides s'accumulent d'une image à l'autre).
+    // Opaque, l'effacement est inutile : les panneaux recouvrent tout.
+    egui_software_backend::set_clear_each_frame(vs.backdrop);
 }
 
 /// Demandes ponctuelles de l'état (focus, plein écran, menu shell).

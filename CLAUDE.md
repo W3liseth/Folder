@@ -104,7 +104,7 @@ avec pour description sa section de `CHANGELOG.md` : tout changement de version 
 vérifié par `cargo test`) :
 
 ```bash
-iscc /DAppVersion=0.8.1 installer/folder.iss
+iscc /DAppVersion=0.9.0 installer/folder.iss
 ```
 
 Générer les jeux de test (une seule fois) :
@@ -150,9 +150,12 @@ Sens des dépendances : `fx-ui → fx-app → {fx-commands, fx-store, fx-preview
   rasterisées, le contenu qui défile est recopié ; une image qui change toute la fenêtre
   coûte encore une rasterisation complète (~3 ms en 1080p, ~4 ms en 1440p, ~10 ms en 4K).
   Ne pas réactiver le cache du rasteriseur (mesuré plus lent et 3× plus gourmand en
-  défilement) sans nouvelle mesure `renderbench`. Le tampon n'est jamais effacé : toute zone
-  de la fenêtre doit être peinte par un panneau opaque, sinon il reste des traces. Toute
-  modification du moteur vendu passe `renderbench --verify` (rendu partiel = rendu complet).
+  défilement) sans nouvelle mesure `renderbench`. Fond opaque : le tampon n'est jamais
+  effacé, toute zone de la fenêtre doit être peinte par un panneau opaque, sinon il reste des
+  traces. Fond Acrylic (`Palette::with_acrylic`, ARCHITECTURE.md §7.7) : panneaux
+  transparents ou translucides, chaque zone redessinée est effacée avant d'être rasterisée.
+  Toute modification du moteur vendu passe `renderbench --verify` et
+  `renderbench --verify --acrylic` (rendu partiel = rendu complet).
 - **Annulation** : tout travail lié à une navigation porte `(pane_id, generation)` + `CancelToken`
   et vérifie l'annulation entre chaque lot.
 - **Streaming** : l'énumération envoie des lots (512 éléments ou 8 ms) ; l'UI affiche dès le premier.

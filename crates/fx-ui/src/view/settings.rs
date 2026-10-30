@@ -53,7 +53,7 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
                     .animate_bool_with_time(r.id.with("a"), active, 0.15);
                 if t > 0.0 {
                     ui.painter()
-                        .rect_filled(rect, 6.0, pal.hover.gamma_multiply(1.6 * t));
+                        .rect_filled(rect, 4.0, pal.hover.gamma_multiply(1.6 * t));
                     ui.painter().rect_filled(
                         egui::Rect::from_center_size(
                             pos2(rect.left() + 2.0, rect.center().y),
@@ -129,7 +129,7 @@ fn setting(ui: &mut Ui, f: &Fx<'_>, title: &str, desc: &str, control: impl FnOnc
     Frame::new()
         .fill(pal.layer)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -228,6 +228,22 @@ fn appearance(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
                 });
         },
     );
+    let system = f.vs.system_transparency;
+    let acrylic_hint = if system {
+        "Fond translucide et flouté (Acrylic) derrière la fenêtre."
+    } else {
+        "Sans effet pour l'instant : les « Effets de transparence » sont désactivés dans          Windows (Personnalisation › Couleurs)."
+    };
+    let mut open_colors = false;
+    setting(ui, f, "Effet de transparence", acrylic_hint, |ui| {
+        toggle(ui, &mut s.acrylic);
+        if !system && ui.button("Activer dans Windows").clicked() {
+            open_colors = true;
+        }
+    });
+    if open_colors {
+        f.send(Msg::OpenSystemSettings("ms-settings:colors"));
+    }
     accent_setting(ui, f, s);
     setting(ui, f, "Barre latérale", "", |ui| {
         toggle(ui, &mut s.show_sidebar)
@@ -252,18 +268,19 @@ fn accent_setting(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     Frame::new()
         .fill(pal.layer)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label("Couleur d'accentuation");
-                    ui.label(
-                        RichText::new("Boutons, sélection, indicateurs.")
-                            .size(12.0)
-                            .color(pal.text2),
-                    );
+                    let desc = if f.vs.system_accent_neutral {
+                        "Boutons, sélection, indicateurs. L'accent de Windows étant gris,                          « Couleur de Windows » utilise le bleu de Windows."
+                    } else {
+                        "Boutons, sélection, indicateurs."
+                    };
+                    ui.label(RichText::new(desc).size(12.0).color(pal.text2));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let mut system = s.accent.is_none();
@@ -283,7 +300,7 @@ fn accent_setting(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
                 for c in crate::theme::ACCENTS {
                     let (rect, r) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
                     let color = egui::Color32::from_rgb(c[0], c[1], c[2]);
-                    ui.painter().rect_filled(rect.shrink(3.0), 6.0, color);
+                    ui.painter().rect_filled(rect.shrink(3.0), 4.0, color);
                     if s.accent == Some(c) {
                         ui.painter().rect_stroke(
                             rect,
@@ -681,7 +698,7 @@ fn updates(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     Frame::new()
         .fill(pal.layer)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

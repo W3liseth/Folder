@@ -1,8 +1,9 @@
 //! Fenêtre principale : recherche du HWND, placement (écran, taille, état agrandi), cadre DWM
 //! (coins arrondis, ombre, mode sombre), position du curseur.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
+    DWM_SYSTEMBACKDROP_TYPE, DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
     DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
 };
@@ -120,8 +121,19 @@ pub fn show_with_placement(hwnd: isize, p: &Placement) -> bool {
 }
 
 /// Cadre Windows 11 pour une fenêtre sans décorations natives : coins arrondis, ombre DWM,
-/// barre de titre système en mode sombre si demandé.
-pub fn style_frame(hwnd: isize, dark: bool) {
+/// barre de titre système en mode sombre si demandé, et fond Acrylic si `acrylic`.
+///
+/// Acrylic : DWM peint le fond flouté (`DWMSBT_TRANSIENTWINDOW`, Windows 11 22H2+) sous la
+/// fenêtre, teinté clair ou sombre selon `DWMWA_USE_IMMERSIVE_DARK_MODE`. Il transparaît là
+/// où l'image de la fenêtre est transparente : la fenêtre est créée « transparente » (winit
+/// active alors `DwmEnableBlurBehindWindow` avec une région vide, ce qui fait composer son
+/// canal alpha prémultiplié). La marge de verre reste de 1 px (ombre, coins arrondis) : une
+/// zone de verre étendue à toute la fenêtre ferait dessiner par DWM ses propres boutons
+/// réduire/agrandir/fermer par-dessus ceux de la barre de titre maison.
+///
+/// Renvoie faux si Windows ne sait pas peindre ce fond (Windows 10, Windows 11 avant 22H2) :
+/// l'appelant doit alors peindre un fond opaque.
+pub fn style_frame(hwnd: isize, dark: bool, acrylic: bool) -> bool {
     let hwnd = HWND(hwnd as *mut _);
     let pref = DWMWCP_ROUND;
     let dark = BOOL::from(dark);
@@ -131,8 +143,13 @@ pub fn style_frame(hwnd: isize, dark: bool) {
         cyTopHeight: 1,
         cyBottomHeight: 1,
     };
+    let backdrop: DWM_SYSTEMBACKDROP_TYPE = if acrylic {
+        DWMSBT_TRANSIENTWINDOW
+    } else {
+        DWMSBT_NONE
+    };
     // SAFETY: attributs DWM documentés, pointeurs vers des valeurs locales de la bonne taille.
-    // Les échecs (Windows 10 sans coins arrondis…) sont sans conséquence.
+    // Les échecs (Windows 10 sans coins arrondis ni fond système…) sont sans conséquence.
     unsafe {
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -146,8 +163,72 @@ pub fn style_frame(hwnd: isize, dark: bool) {
             (&raw const dark).cast(),
             4,
         );
+        let applied = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            (&raw const backdrop).cast(),
+            4,
+        )
+        .is_ok();
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        keep_backdrop_active(hwnd, acrylic && applied);
+        acrylic && applied
     }
+}
+
+/// Identifiant du sous-classement de [`keep_backdrop_active`].
+const BACKDROP_SUBCLASS: usize = 0x666F_6C66;
+
+/// DWM remplace le fond système par une couleur unie dès que la fenêtre perd le focus (passage
+/// dans Paramètres, clic dans une autre application) : l'Acrylic disparaîtrait la plupart du
+/// temps. La fenêtre se déclare donc toujours « active » à DWM tant que le fond est demandé :
+/// `WM_NCACTIVATE` est transmis avec `TRUE`. Le focus clavier réel (`WM_ACTIVATE`,
+/// `WM_SETFOCUS`, `WM_KILLFOCUS`) est inchangé ; la fenêtre n'a pas de barre de titre native
+/// dont l'aspect inactif manquerait.
+fn keep_backdrop_active(hwnd: HWND, on: bool) {
+    use windows::Win32::UI::Shell::SetWindowSubclass;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, PostMessageW, WM_NCACTIVATE,
+    };
+    // SAFETY: fenêtre du thread courant (appel depuis le thread UI). Réinstaller la même
+    // procédure avec le même identifiant met seulement à jour la donnée (`on`).
+    unsafe {
+        let _ = SetWindowSubclass(
+            hwnd,
+            Some(backdrop_proc),
+            BACKDROP_SUBCLASS,
+            usize::from(on),
+        );
+        // Mise à jour immédiate, sans attendre le prochain changement de focus : actif si le
+        // fond est demandé, sinon l'état réel. Message posté (pas d'appel réentrant dans la
+        // boucle de winit pendant qu'elle dessine).
+        let active = on || GetForegroundWindow() == hwnd;
+        let _ = PostMessageW(
+            Some(hwnd),
+            WM_NCACTIVATE,
+            WPARAM(usize::from(active)),
+            LPARAM(0),
+        );
+    }
+}
+
+unsafe extern "system" fn backdrop_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    keep_active: usize,
+) -> LRESULT {
+    use windows::Win32::UI::Shell::DefSubclassProc;
+    use windows::Win32::UI::WindowsAndMessaging::WM_NCACTIVATE;
+    let wparam = if msg == WM_NCACTIVATE && keep_active != 0 {
+        WPARAM(1)
+    } else {
+        wparam
+    };
+    // SAFETY: transmission au traitement par défaut de la chaîne de sous-classes.
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 /// Barre de titre native d'une fenêtre secondaire en mode sombre (ou clair).

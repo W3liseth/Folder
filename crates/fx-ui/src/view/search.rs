@@ -156,7 +156,7 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                     let (rect, r) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
                     if selected {
-                        ui.painter().rect_filled(rect, 6.0, pal.selection);
+                        ui.painter().rect_filled(rect, 4.0, pal.selection);
                         widgets::accent_pill(
                             ui,
                             pos2(rect.left() + 1.5, rect.center().y),

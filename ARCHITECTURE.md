@@ -613,7 +613,42 @@ pub trait Action: Send + Sync {
   leurs caches LRU (§7.4) comptent dans le budget mémoire privée.
 - Thème Fluent (clair/sombre suivant `AppsUseLightTheme`, couleur d'accentuation
   système), coins arrondis, Segoe UI Variable, glyphes Segoe Fluent Icons (police système).
-  Fond Mica optionnel via `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)`.
+  Accent : celui de Windows, sauf s'il est presque gris (saturation < 18 %, cas d'un accent
+  tiré d'un fond d'écran sombre) : le bleu de Windows (#0078D4) le remplace, sans quoi
+  l'interface n'aurait aucune couleur ; la page Paramètres l'explique. Rayons : 4 px pour
+  les contrôles et les éléments de liste (lignes, survols, sélections, cartes de réglage),
+  8 px pour les surfaces (carte de contenu, tuiles, dialogues, menus) ; pastilles
+  (étiquettes, badges) en demi-hauteur. L'onglet actif et les barres de navigation et
+  d'outils partagent une même couleur (`Palette::chrome`, la couche composée sur le fond de
+  fenêtre) et l'onglet se prolonge par deux congés concaves : une seule surface, comme dans
+  Files.
+  Fond **Acrylic** (Windows 11 22H2+, réglage `acrylic`, actif par défaut ; Paramètres ›
+  Apparence › Effet de transparence) : `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`
+  sur la fenêtre principale, créée transparente (winit : `DwmEnableBlurBehindWindow`, région
+  vide), DWM composant alors son canal alpha prémultiplié. Marge de verre de 1 px seulement :
+  étendue à toute la fenêtre, DWM y dessinerait ses propres boutons de légende. La palette
+  (`Palette::with_acrylic`) pose une teinte légère sur `base` et `side` (barre de titre,
+  barre latérale, barre d'état ; ~20 % en sombre, ~31 % en clair) et une couche à peine plus
+  couvrante sur `layer` (onglet actif, barres de navigation et d'outils, liste ; ~47 % en
+  sombre, ~57 % en clair) : le flou se voit franchement partout, la lisibilité repose sur les
+  contrastes de texte Fluent. Menus, dialogues et fenêtres restent opaques, comme les
+  fenêtres Paramètres et Propriétés. Typographie : titres de section et en-têtes de colonnes
+  en casse normale (semi-gras 12,5 pt pour les sections, texte secondaire), comme Windows 11.
+  DWM remplace ce fond par une couleur unie dès que la fenêtre perd le focus (passage dans
+  Paramètres, autre application) : tant que l'Acrylic est demandé, un sous-classement
+  (`fx_win::window`) transmet `WM_NCACTIVATE` avec `TRUE`, la fenêtre restant « active »
+  pour DWM (le focus clavier réel est inchangé). Activer ou couper l'effet donne un fondu de
+  150 ms (`view::acrylic_fade`, mesuré à l'horloge : `Context::animate_bool` avance d'après
+  `stable_dt`, qui couvre toute la pause précédente et finissait le fondu dès la première
+  image) ; le fond de DWM s'allume avant le fondu vers l'Acrylic et ne s'éteint qu'après le
+  fondu vers l'opaque, sous une palette opaque (sinon un éclair blanc d'une image).
+  Ignoré si les « Effets de transparence » de Windows sont coupés (`EnableTransparency` :
+  DWM n'afficherait qu'une couleur de repli, sans flou, quelle que soit l'API) ou si DWM
+  refuse le fond (Windows 10) : palette opaque. Le réglage Windows est relu au plus une fois
+  par seconde, aux images produites (l'Acrylic apparaît dès le retour dans folder) ; la page
+  Paramètres propose alors d'ouvrir `ms-settings:colors` (`Msg::OpenSystemSettings`).
+  Rendu CPU : sous Acrylic, chaque zone redessinée est d'abord effacée (`set_clear_each_frame(true)`), sinon les couches translucides s'accumuleraient ;
+  vérifié par `renderbench --verify --acrylic` et le test `partial_render_matches_full_render`.
 - Accessibilité : AccessKit (intégré à egui) ; navigation clavier complète ; tous les
   éléments interactifs atteignables sans souris. **Attention** : le moteur CPU vendu ne
   branche pas encore AccessKit (pas d'appel à `egui_winit::State::init_accesskit`) —
@@ -1230,4 +1265,5 @@ complet) ; `clippy -D warnings` propre, y compris avec la feature `wgpu`.
   corbeille (aujourd'hui rechargée après chaque opération de folder, pas lors d'une
   suppression faite ailleurs) ; case « tout sélectionner » dans la vue Colonnes.
 - Archives 7z/RAR et parcours d'archive comme dossier ; Windows Search ; Git (statut,
-  opérations) ; FTP ; multi-fenêtres dans un même processus ; traduction ; Mica.
+  opérations) ; FTP ; multi-fenêtres dans un même processus ; traduction ; Mica (en plus
+  de l'Acrylic).

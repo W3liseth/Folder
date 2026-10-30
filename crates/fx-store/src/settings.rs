@@ -39,6 +39,9 @@ impl Layout {
 #[serde(default)]
 pub struct Settings {
     pub theme: ThemeChoice,
+    /// Fond Acrylic de Windows 11 (flou translucide) derrière la barre de titre, la barre
+    /// latérale et les barres d'outils ; sans effet si Windows désactive la transparence.
+    pub acrylic: bool,
     pub show_hidden: bool,
     pub show_extensions: bool,
     /// Étiquettes : section de la barre latérale et de l'accueil, menu contextuel, pastilles.
@@ -84,6 +87,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeChoice::System,
+            acrylic: true,
             show_hidden: false,
             show_extensions: true,
             show_tags: true,

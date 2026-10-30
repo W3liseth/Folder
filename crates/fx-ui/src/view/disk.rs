@@ -758,7 +758,7 @@ fn treemap(
     if cache.tiles.is_empty() {
         // Le fond n'est peint que sans image : celle-ci le contient déjà (une seule passe
         // sur la surface de la carte avec le moteur CPU).
-        painter.rect_filled(rect, 6.0, pal.hover);
+        painter.rect_filled(rect, 4.0, pal.hover);
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,

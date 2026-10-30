@@ -186,7 +186,9 @@ pub fn run(opts: Options) -> Result<(), Error> {
         .with_min_inner_size([640.0, 420.0])
         // Barre de titre maison avec onglets (comme Files) ; le cadre DWM reste natif.
         .with_decorations(false)
-        .with_transparent(false)
+        // Canal alpha conservé pour le fond Acrylic (`fx_win::window::style_frame`) ; sans
+        // Acrylic, les panneaux opaques couvrent toute la fenêtre et l'alpha reste plein.
+        .with_transparent(true)
         // Créée cachée : la première image la place (écran, taille, état agrandi de la
         // dernière fermeture) et l'affiche directement ainsi (cf. `Core::show_window`).
         .with_visible(false);
@@ -574,7 +576,12 @@ impl eframe::App for GpuApp {
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        visuals.panel_fill.to_normalized_gamma_f32()
+        if self.0.view.backdrop {
+            // Fond Acrylic de DWM : il transparaît là où l'interface ne peint rien.
+            [0.0; 4]
+        } else {
+            visuals.panel_fill.to_normalized_gamma_f32()
+        }
     }
 }
 

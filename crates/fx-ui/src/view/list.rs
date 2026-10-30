@@ -259,8 +259,9 @@ fn header(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, cols: &Cols, w: [f32; 4], re
         } else {
             (Align2::LEFT_CENTER, x0 + 8.0)
         };
-        let _ = font;
-        let tr = crate::widgets::caps(ui, pos2(x, cell.center().y), anchor, label, 10.5, pal.text3);
+        let tr = ui
+            .painter()
+            .text(pos2(x, cell.center().y), anchor, label, font, pal.text2);
         if let Some(dir) = sort_indicator(pane, key) {
             let g = if dir == SortDir::Asc {
                 glyph::CHEVRON_UP
@@ -391,7 +392,7 @@ fn row(
         } else {
             pal.selection
         };
-        ui.painter().rect_filled(bg, 6.0, fill.gamma_multiply(sel));
+        ui.painter().rect_filled(bg, 4.0, fill.gamma_multiply(sel));
         // Halo d'accent qui part de la pastille et s'éteint vers la droite.
         let glow = Rect::from_min_max(
             pos2(bg.left() + 6.0, bg.top()),
@@ -412,7 +413,7 @@ fn row(
     }
     if !selected && hover > 0.0 {
         ui.painter()
-            .rect_filled(bg, 6.0, pal.hover.gamma_multiply(hover));
+            .rect_filled(bg, 4.0, pal.hover.gamma_multiply(hover));
     }
 
     let y = rect.center().y;

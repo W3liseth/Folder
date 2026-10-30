@@ -30,14 +30,14 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
         widgets::glow(
             ui,
             rect.translate(vec2(0.0, 2.0)),
-            10.0,
+            8.0,
             egui::Color32::from_black_alpha(if pal.dark { 70 } else { 22 }),
             14.0,
         );
-        ui.painter().rect_filled(rect, 10.0, pal.layer);
+        ui.painter().rect_filled(rect, 8.0, pal.layer);
         ui.painter().rect_stroke(
             rect,
-            10.0,
+            8.0,
             egui::Stroke::new(1.0, pal.stroke),
             egui::StrokeKind::Inside,
         );
@@ -53,7 +53,8 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
             1.0,
             highlight,
         );
-        if n == 1 || i == tab.active {
+        // Liseré d'accent : seulement pour distinguer le volet actif en double volet.
+        if n > 1 && i == tab.active {
             widgets::neon_line(
                 ui,
                 (rect.left() + rect.width() * 0.2)..=(rect.right() - rect.width() * 0.2),

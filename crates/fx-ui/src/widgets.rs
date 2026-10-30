@@ -208,38 +208,19 @@ pub fn vsep(ui: &mut Ui, pal: &Palette) {
     );
 }
 
-/// Titre de section (barre latérale, accueil).
+/// Titre de section (barre latérale, accueil) : casse normale, semi-gras, texte secondaire,
+/// comme les en-têtes de groupe de Windows 11.
 pub fn section(ui: &mut Ui, pal: &Palette, text: &str) {
-    ui.add_space(10.0);
+    ui.add_space(12.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.label(caps_job(text, 10.5, pal.text3));
+        ui.label(
+            egui::RichText::new(text)
+                .font(crate::theme::semibold(12.5))
+                .color(pal.text2),
+        );
     });
-    ui.add_space(3.0);
-}
-
-/// Petites capitales espacées (titres de section, en-têtes de colonnes).
-pub fn caps_job(text: &str, size: f32, color: Color32) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::default();
-    let mut fmt = egui::TextFormat::simple(crate::theme::semibold(size), color);
-    fmt.extra_letter_spacing = size * 0.09;
-    job.append(&text.to_uppercase(), 0.0, fmt);
-    job
-}
-
-/// Dessine des petites capitales espacées ; renvoie leur rectangle.
-pub fn caps(
-    ui: &Ui,
-    pos: egui::Pos2,
-    anchor: Align2,
-    text: &str,
-    size: f32,
-    color: Color32,
-) -> Rect {
-    let galley = ui.painter().layout_job(caps_job(text, size, color));
-    let rect = anchor.anchor_size(pos, galley.size());
-    ui.painter().galley(rect.min, galley, color);
-    rect
+    ui.add_space(4.0);
 }
 
 /// Dégradé horizontal sur un rectangle aux bords droits (les bords obliques ou arrondis

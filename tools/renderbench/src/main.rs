@@ -4,6 +4,7 @@
 //! ```text
 //! renderbench --tree bench-data/100k [--frames 300]
 //! renderbench --tree bench-data/100k --verify [--frames 600]
+//! renderbench --tree bench-data/100k [--verify] --acrylic
 //! cargo run --release -p renderbench --features rayon -- --tree bench-data/100k
 //! ```
 //!
@@ -22,6 +23,9 @@
 //! `--verify` : défilements variés (bas, haut, petits pas, arrêts), survol, clics, Ctrl+A et
 //! menu contextuel simulés ; chaque image du mode partiel est comparée pixel à pixel à un
 //! rendu complet. Code de sortie 1 au moindre écart.
+//!
+//! `--acrylic` : palette translucide du fond Acrylic ; comme fx dans ce cas, chaque zone
+//! redessinée est d'abord effacée (et tout le tampon pour un rendu complet).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -88,9 +92,9 @@ fn main() -> Result<()> {
     if std::env::args().any(|a| a == "--disk") {
         return disk::main();
     }
-    let (tree, frames, verify) = parse_args()?;
+    let (tree, frames, verify, acrylic) = parse_args()?;
     if verify {
-        return verify_all(&tree, frames);
+        return verify_all(&tree, frames, acrylic);
     }
     let rayon = cfg!(feature = "rayon");
     println!(
@@ -111,7 +115,7 @@ fn main() -> Result<()> {
     );
     for res in &RESOLUTIONS {
         for mode in [Mode::Cache, Mode::Full, Mode::Partial] {
-            let r = run(&tree, res, mode, frames)?;
+            let r = run(&tree, res, mode, frames, acrylic)?;
             println!(
                 "{:<11} {:>4.1} {:>7} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.1} Mo",
                 format!("{}x{}", res.w, res.h),
@@ -157,10 +161,11 @@ fn raw_input(res: &Res, frame: usize) -> RawInput {
     raw
 }
 
-fn run(tree: &Path, res: &Res, mode: Mode, frames: usize) -> Result<Report> {
+fn run(tree: &Path, res: &Res, mode: Mode, frames: usize, acrylic: bool) -> Result<Report> {
     let before = private_mb();
     let ctx = egui::Context::default();
     let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree)?);
+    harness.set_acrylic(acrylic);
     let mut renderer =
         EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(mode == Mode::Cache);
     let mut buffer = vec![[0u8; 4]; res.w * res.h];
@@ -176,7 +181,7 @@ fn run(tree: &Path, res: &Res, mode: Mode, frames: usize) -> Result<Report> {
         let t1 = Instant::now();
         let prims = ctx.tessellate(out.shapes, out.pixels_per_point);
         let t2 = Instant::now();
-        if mode == Mode::Cache {
+        if mode == Mode::Cache || (acrylic && mode == Mode::Full) {
             buffer.fill([0; 4]);
         }
         let mut target = BufferMutRef::new(&mut buffer, res.w, res.h);
@@ -187,7 +192,7 @@ fn run(tree: &Path, res: &Res, mode: Mode, frames: usize) -> Result<Report> {
                 &out.textures_delta,
                 out.pixels_per_point,
                 true,
-                false,
+                acrylic,
             );
         } else {
             renderer.render(
@@ -222,7 +227,7 @@ fn run(tree: &Path, res: &Res, mode: Mode, frames: usize) -> Result<Report> {
 
 /// Rendu partiel comparé image par image à un rendu complet, à plusieurs résolutions et
 /// échelles (dont des échelles fractionnaires).
-fn verify_all(tree: &Path, frames: usize) -> Result<()> {
+fn verify_all(tree: &Path, frames: usize, acrylic: bool) -> Result<()> {
     let extra = Res {
         w: 1600,
         h: 900,
@@ -230,7 +235,7 @@ fn verify_all(tree: &Path, frames: usize) -> Result<()> {
     };
     let mut ok = true;
     for res in RESOLUTIONS[..3].iter().chain([&extra]) {
-        ok &= verify(tree, res, frames)?;
+        ok &= verify(tree, res, frames, acrylic)?;
     }
     if !ok {
         bail!("le rendu partiel diffère du rendu complet");
@@ -252,9 +257,10 @@ const VERIFY_STEPS: [f32; 16] = [
     84.0, 84.0, 30.0, -45.0, 0.0, 3.0, -84.0, 120.0, 1.0, 0.0, 0.0, -2.0, 60.0, 17.5, -30.0, 0.0,
 ];
 
-fn verify(tree: &Path, res: &Res, frames: usize) -> Result<bool> {
+fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool) -> Result<bool> {
     let ctx = egui::Context::default();
     let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree)?);
+    harness.set_acrylic(acrylic);
     let mut partial = EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(false);
     let mut full = EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(false);
     let mut a = vec![[0u8; 4]; res.w * res.h];
@@ -277,8 +283,11 @@ fn verify(tree: &Path, res: &Res, frames: usize) -> Result<bool> {
             &out.textures_delta,
             out.pixels_per_point,
             true,
-            false,
+            acrylic,
         );
+        if acrylic {
+            b.fill([0; 4]);
+        }
         full.render(
             &mut BufferMutRef::new(&mut b, res.w, res.h),
             &prims,
@@ -443,10 +452,11 @@ fn private_mb() -> f64 {
     fx_win::process::current_memory().map_or(f64::NAN, |m| m.private_bytes as f64 / 1_048_576.0)
 }
 
-fn parse_args() -> Result<(PathBuf, usize, bool)> {
+fn parse_args() -> Result<(PathBuf, usize, bool, bool)> {
     let mut tree = None;
     let mut frames = 300;
     let mut verify = false;
+    let mut acrylic = false;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -457,11 +467,12 @@ fn parse_args() -> Result<(PathBuf, usize, bool)> {
             }
             "--frames" => frames = it.next().context("--frames attend un nombre")?.parse()?,
             "--verify" => verify = true,
+            "--acrylic" => acrylic = true,
             other => bail!("option inconnue : {other}"),
         }
     }
     let tree = tree.context("--tree <dossier> est requis")?;
-    Ok((std::path::absolute(tree)?, frames, verify))
+    Ok((std::path::absolute(tree)?, frames, verify, acrylic))
 }
 
 #[cfg(test)]
@@ -469,7 +480,9 @@ mod tests {
     use super::*;
 
     /// Le rendu partiel (zones modifiées, défilement par recopie) donne la même image qu'un
-    /// rendu complet, à chaque image d'un scénario de défilement, survol, sélection et menu.
+    /// rendu complet, à chaque image d'un scénario de défilement, survol, sélection et menu ;
+    /// aussi sous la palette Acrylic (couches translucides, zones effacées avant d'être
+    /// redessinées).
     #[test]
     fn partial_render_matches_full_render() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("fx-renderbench-{}", std::process::id()));
@@ -488,8 +501,9 @@ mod tests {
         };
         let mut ok = true;
         for (ppp, frames) in [1.0, 1.25].into_iter().zip(frames) {
-            ok &= verify(&dir, &Res { w, h, ppp }, frames)?;
+            ok &= verify(&dir, &Res { w, h, ppp }, frames, false)?;
         }
+        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], true)?;
         let _ = std::fs::remove_dir_all(&dir);
         assert!(ok, "le rendu partiel diffère du rendu complet");
         Ok(())

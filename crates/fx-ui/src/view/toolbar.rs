@@ -62,7 +62,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
     egui::Panel::top("toolbar")
         .exact_size(44.0)
         .show_separator_line(false)
-        .frame(Frame::new().fill(pal.layer).inner_margin(Margin {
+        .frame(Frame::new().fill(pal.chrome).inner_margin(Margin {
             left: 8,
             right: 10,
             top: 2,

@@ -290,7 +290,7 @@ fn paint_highlight(ui: &Ui, f: &mut Fx<'_>, slot: egui::layers::ShapeIdx, origin
     ui.painter().set(
         slot,
         egui::Shape::Vec(vec![
-            egui::Shape::rect_filled(rect, 6.0, pal.hover.gamma_multiply(1.4 * alpha)),
+            egui::Shape::rect_filled(rect, 4.0, pal.hover.gamma_multiply(1.4 * alpha)),
             egui::Shape::mesh(fade),
             glow.into(),
             egui::Shape::rect_filled(pill, 1.5, pal.accent.gamma_multiply(alpha)),

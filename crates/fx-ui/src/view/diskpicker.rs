@@ -32,7 +32,7 @@ pub fn button(ui: &mut Ui, f: &mut Fx<'_>, size: egui::Vec2) {
     f.vs.disk_anchor = Some(r.rect);
     if open {
         ui.painter()
-            .rect_filled(r.rect.shrink(1.0), 6.0, pal.selection);
+            .rect_filled(r.rect.shrink(1.0), 4.0, pal.selection);
         ui.painter().text(
             r.rect.center(),
             Align2::CENTER_CENTER,
@@ -187,7 +187,7 @@ fn drive_row(ui: &mut Ui, f: &mut Fx<'_>, d: &fx_win::sys::Drive) {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
     let on = f.vs.disk_pick.contains(&d.root);
     if r.hovered() {
-        ui.painter().rect_filled(rect, 6.0, pal.hover);
+        ui.painter().rect_filled(rect, 4.0, pal.hover);
     }
     if r.clicked() {
         if on {

@@ -99,10 +99,16 @@ pub mod glyph {
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
     pub dark: bool,
+    /// Fond Acrylic (DWM) visible : `base` et `side` sont transparents, `layer` translucide.
+    pub acrylic: bool,
     /// Fond de la fenêtre (barre de titre, barres d'outils).
     pub base: Color32,
     /// Fond des zones de contenu (cartes).
     pub layer: Color32,
+    /// Fond des barres de navigation et d'outils : `layer` composée sur `base`, comme l'onglet
+    /// actif posé dans la barre de titre, pour que l'onglet et ces barres ne fassent qu'une
+    /// surface (identique à `layer` quand le fond est opaque).
+    pub chrome: Color32,
     /// Fond de la barre latérale.
     pub side: Color32,
     pub card: Color32,
@@ -133,15 +139,17 @@ impl Palette {
         if dark {
             Self {
                 dark,
+                acrylic: false,
                 base: Color32::from_rgb(32, 32, 32),
                 layer: Color32::from_rgb(39, 39, 39),
+                chrome: Color32::from_rgb(39, 39, 39),
                 side: Color32::from_rgb(32, 32, 32),
                 card: Color32::from_rgb(45, 45, 45),
                 stroke: Color32::from_white_alpha(14),
                 stroke_strong: Color32::from_white_alpha(28),
                 text: Color32::from_gray(240),
                 text2: Color32::from_gray(190),
-                text3: Color32::from_gray(130),
+                text3: Color32::from_gray(150),
                 accent: lighten(accent, 0.35),
                 on_accent: Color32::from_gray(10),
                 selection: accent.gamma_multiply(0.32),
@@ -157,15 +165,17 @@ impl Palette {
         } else {
             Self {
                 dark,
+                acrylic: false,
                 base: Color32::from_rgb(238, 238, 238),
                 layer: Color32::from_rgb(251, 251, 251),
+                chrome: Color32::from_rgb(251, 251, 251),
                 side: Color32::from_rgb(238, 238, 238),
                 card: Color32::WHITE,
                 stroke: Color32::from_black_alpha(18),
                 stroke_strong: Color32::from_black_alpha(36),
                 text: Color32::from_gray(20),
                 text2: Color32::from_gray(80),
-                text3: Color32::from_gray(140),
+                text3: Color32::from_gray(110),
                 accent,
                 on_accent: Color32::WHITE,
                 selection: accent.gamma_multiply(0.18),
@@ -182,7 +192,64 @@ impl Palette {
     }
 }
 
-/// Mélange `c` et `with` (`t` = part de `with`).
+impl Palette {
+    /// Variante pour un fond Acrylic, `t` allant de 0 (palette opaque) à 1 (Acrylic) : les
+    /// valeurs intermédiaires servent au fondu quand on active ou coupe l'effet.
+    ///
+    /// Le fond « transitoire » de DWM floute ce qui est derrière la fenêtre. folder y pose une
+    /// teinte légère sur le cadre (barre de titre, barre latérale, barre d'état) et une couche
+    /// à peine plus couvrante sur le contenu (onglet actif, barres de navigation et d'outils,
+    /// liste) : le flou se voit franchement partout, et le texte (contrastes Fluent) reste
+    /// lisible. Menus, fenêtres et dialogues (`card`) restent opaques.
+    #[must_use]
+    pub fn with_acrylic(mut self, t: f32) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        if t <= 0.0 {
+            return self;
+        }
+        self.acrylic = true;
+        let (tint, layer) = if self.dark {
+            (
+                Color32::from_rgba_unmultiplied(30, 30, 30, 50),
+                Color32::from_rgba_unmultiplied(40, 40, 40, 120),
+            )
+        } else {
+            (
+                Color32::from_rgba_unmultiplied(243, 243, 243, 80),
+                Color32::from_rgba_unmultiplied(252, 252, 252, 145),
+            )
+        };
+        self.base = lerp(self.base, tint, t);
+        self.side = lerp(self.side, tint, t);
+        self.layer = lerp(self.layer, layer, t);
+        self.chrome = over(self.layer, self.base);
+        self
+    }
+}
+
+/// Interpolation de deux couleurs prémultipliées (fondu de l'une vers l'autre).
+fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
+    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgba_premultiplied(
+        m(a.r(), b.r()),
+        m(a.g(), b.g()),
+        m(a.b(), b.b()),
+        m(a.a(), b.a()),
+    )
+}
+
+/// `src` posée sur `dst` (couleurs prémultipliées, mélange « over » du moteur de rendu).
+fn over(src: Color32, dst: Color32) -> Color32 {
+    let k = 255 - u16::from(src.a());
+    let c = |s: u8, d: u8| (u16::from(s) + (u16::from(d) * k + 127) / 255).min(255) as u8;
+    Color32::from_rgba_premultiplied(
+        c(src.r(), dst.r()),
+        c(src.g(), dst.g()),
+        c(src.b(), dst.b()),
+        c(src.a(), dst.a()),
+    )
+}
+
 /// Extrémités d'un dégradé autour d'une couleur : teinte décalée de part et d'autre (bleu :
 /// du cyan vers l'indigo ; rouge : du magenta vers l'orange), début un peu plus lumineux.
 pub fn gradient_pair(c: Color32) -> (Color32, Color32) {
@@ -197,6 +264,7 @@ pub fn gradient_pair(c: Color32) -> (Color32, Color32) {
     (shift(-0.045, 1.12), shift(0.055, 0.96))
 }
 
+/// Mélange `c` et `with` (`t` = part de `with`).
 pub fn mix(c: Color32, with: Color32, t: f32) -> Color32 {
     let m = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
     Color32::from_rgb(m(c.r(), with.r()), m(c.g(), with.g()), m(c.b(), with.b()))
@@ -207,11 +275,29 @@ fn lighten(c: Color32, t: f32) -> Color32 {
     Color32::from_rgb(l(c.r()), l(c.g()), l(c.b()))
 }
 
-/// Couleur d'accentuation système (bleu Windows par défaut).
+/// Bleu d'accentuation par défaut de Windows (#0078D4).
+const WINDOWS_BLUE: Color32 = Color32::from_rgb(0, 120, 212);
+
+/// Couleur d'accentuation système. Un accent Windows presque gris (choisi d'après le fond
+/// d'écran, par exemple) laisserait l'interface sans aucune couleur (bouton Nouveau,
+/// sélection, indicateurs) : le bleu de Windows le remplace alors.
 pub fn system_accent() -> Color32 {
-    fx_win::theme::accent_color().map_or(Color32::from_rgb(0, 103, 192), |[r, g, b]| {
-        Color32::from_rgb(r, g, b)
-    })
+    match fx_win::theme::accent_color() {
+        Some([r, g, b]) if !is_neutral(Color32::from_rgb(r, g, b)) => Color32::from_rgb(r, g, b),
+        _ => WINDOWS_BLUE,
+    }
+}
+
+/// L'accent de Windows est trop neutre pour servir d'accent (cf. [`system_accent`]).
+pub fn system_accent_is_neutral() -> bool {
+    fx_win::theme::accent_color().is_some_and(|[r, g, b]| is_neutral(Color32::from_rgb(r, g, b)))
+}
+
+/// Couleur presque grise : saturation (au sens TSV) sous 18 %, ou presque noire.
+fn is_neutral(c: Color32) -> bool {
+    let max = c.r().max(c.g()).max(c.b());
+    let min = c.r().min(c.g()).min(c.b());
+    max < 24 || f32::from(max - min) / f32::from(max) < 0.18
 }
 
 /// Applique le choix de thème (« Système » suit le réglage Windows lu au démarrage).
@@ -239,6 +325,46 @@ pub fn accent_of(settings: &fx_store::Settings, system: Color32) -> Color32 {
 pub fn set_accent(ctx: &egui::Context, accent: Color32) {
     for (theme, dark) in [(Theme::Dark, true), (Theme::Light, false)] {
         ctx.set_visuals_of(theme, visuals(&Palette::new(dark, accent)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chrome_is_layer_over_base() {
+        for dark in [true, false] {
+            let p = Palette::new(dark, WINDOWS_BLUE);
+            assert_eq!(p.chrome, p.layer);
+            assert_eq!(p.with_acrylic(0.0).base, p.base);
+            let a = p.with_acrylic(1.0);
+            assert!(a.chrome.a() > a.layer.a() && a.chrome.a() < 255);
+            assert_eq!(over(a.layer, a.base), a.chrome);
+        }
+        let opaque = Color32::from_rgb(10, 20, 30);
+        assert_eq!(over(opaque, Color32::TRANSPARENT), opaque);
+    }
+
+    #[test]
+    fn acrylic_fade_goes_from_opaque_to_translucent() {
+        let p = Palette::new(true, WINDOWS_BLUE);
+        let alphas: Vec<u8> = [0.0, 0.25, 0.5, 0.75, 1.0]
+            .iter()
+            .map(|&t| p.with_acrylic(t).base.a())
+            .collect();
+        assert_eq!(alphas[0], 255);
+        assert!(alphas.windows(2).all(|w| w[0] > w[1]), "{alphas:?}");
+    }
+
+    #[test]
+    fn neutral_accents_are_detected() {
+        // Gris chaud choisi par Windows d'après un fond d'écran sombre.
+        assert!(is_neutral(Color32::from_rgb(0x4C, 0x4A, 0x48)));
+        assert!(is_neutral(Color32::from_rgb(10, 12, 20)));
+        for [r, g, b] in ACCENTS {
+            assert!(!is_neutral(Color32::from_rgb(r, g, b)), "{r},{g},{b}");
+        }
     }
 }
 

@@ -10,6 +10,16 @@ pub fn apps_prefer_dark() -> bool {
     .is_some_and(|light| light == 0)
 }
 
+/// `true` si les « Effets de transparence » de Windows sont actifs (Personnalisation ›
+/// Couleurs) ; actifs si la valeur manque, comme pour Windows.
+pub fn transparency_enabled() -> bool {
+    read_dword(
+        w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+        w!("EnableTransparency"),
+    )
+    .is_none_or(|on| on != 0)
+}
+
 /// Couleur d'accentuation système en RGB, si disponible.
 pub fn accent_color() -> Option<[u8; 3]> {
     // Stockée en ABGR.

@@ -706,7 +706,7 @@ impl PropsApp {
         Frame::new()
             .fill(pal.card)
             .stroke(egui::Stroke::new(1.0, pal.stroke))
-            .corner_radius(6)
+            .corner_radius(4)
             .inner_margin(Margin::same(4))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

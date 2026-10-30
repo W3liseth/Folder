@@ -33,7 +33,7 @@ pub fn button(ui: &mut Ui, f: &mut Fx<'_>, size: egui::Vec2) {
     f.vs.status_anchor = Some(r.rect);
     if open {
         ui.painter()
-            .rect_filled(r.rect.shrink(1.0), 6.0, pal.selection);
+            .rect_filled(r.rect.shrink(1.0), 4.0, pal.selection);
         ui.painter().text(
             r.rect.center(),
             Align2::CENTER_CENTER,
@@ -200,7 +200,7 @@ fn running_card(ui: &mut Ui, f: &mut Fx<'_>, op: &Operation) {
     let pal = f.pal;
     Frame::new()
         .fill(pal.layer)
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(10)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

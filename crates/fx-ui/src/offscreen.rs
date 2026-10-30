@@ -62,6 +62,12 @@ impl Harness {
         }
     }
 
+    /// Palette Acrylic (fond de fenêtre transparent, couches translucides), comme sous un fond
+    /// DWM : sert à vérifier le rendu partiel avec effacement des zones redessinées.
+    pub fn set_acrylic(&mut self, on: bool) {
+        self.view.backdrop = on;
+    }
+
     /// Fait défiler la liste de `step` points à la prochaine image (retour en haut en fin de liste).
     pub fn scroll(&mut self, step: f32) {
         let pane = self.state.pane();

@@ -369,7 +369,7 @@ fn bulk_rename(ui: &mut Ui, f: &mut Fx<'_>, items: &[PathBuf]) {
         .collect();
     egui::Frame::new()
         .fill(f.pal.layer)
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(8)
         .show(ui, |ui| {
             egui::ScrollArea::vertical()

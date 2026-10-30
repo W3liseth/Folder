@@ -57,6 +57,8 @@ pub enum Msg {
     FocusPane(PaneId),
     /// Ouvre un fichier avec son application par défaut (ou navigue si c'est un dossier).
     OpenPath(PathBuf),
+    /// Page des Paramètres de Windows (`ms-settings:…`, ex. `ms-settings:colors`).
+    OpenSystemSettings(&'static str),
     /// Fenêtre Propriétés de folder pour un chemin.
     Properties(PathBuf),
     /// Fenêtre Propriétés de Windows (onglets avancés : sécurité, versions…).

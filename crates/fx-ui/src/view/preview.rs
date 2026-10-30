@@ -272,7 +272,7 @@ fn code(ui: &mut Ui, f: &Fx<'_>, text: &str, lang: fx_preview::Lang, truncated: 
     job.wrap.max_width = ui.available_width() - 16.0;
     Frame::new()
         .fill(pal.card)
-        .corner_radius(6)
+        .corner_radius(4)
         .inner_margin(8)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
         .show(ui, |ui| {

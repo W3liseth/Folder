@@ -259,7 +259,7 @@ fn tabs(ui: &mut Ui, f: &mut Fx<'_>, area: Rect) -> f32 {
         } else if t > 0.0 {
             ui.painter().rect_filled(
                 rect.shrink2(vec2(0.0, 3.0)).translate(vec2(0.0, -1.0)),
-                6.0,
+                4.0,
                 pal.hover.gamma_multiply(t),
             );
         } else if let Some(pos) = order.iter().position(|&j| j == i)
@@ -437,9 +437,17 @@ fn float_layer(ui: &mut Ui, ctx: &egui::Context, id: Id) -> Ui {
     layer
 }
 
-/// Fond de l'onglet actif (ou saisi) : surface du contenu et liseré d'accent.
+/// Fond de l'onglet actif (ou saisi) : surface du contenu et liseré d'accent. Posé dans la
+/// barre (coins bas droits), il se prolonge par deux congés concaves dans la barre de
+/// navigation, de même couleur : l'onglet et la page ne font qu'une surface, comme dans Files
+/// et Edge.
 fn active_background(ui: &Ui, pal: &crate::theme::Palette, rect: Rect, radius: CornerRadius) {
     ui.painter().rect_filled(rect, radius, pal.layer);
+    if radius.sw == 0 {
+        for side in [-1.0, 1.0] {
+            ui.painter().add(flare(rect, side, pal.layer));
+        }
+    }
     widgets::neon_line(
         ui,
         (rect.left() + 10.0)..=(rect.right() - 10.0),
@@ -447,6 +455,33 @@ fn active_background(ui: &Ui, pal: &crate::theme::Palette, rect: Rect, radius: C
         2.0,
         pal.accent,
     );
+}
+
+/// Congé concave au pied de l'onglet, à gauche (`side` = -1) ou à droite (1) : coin compris
+/// entre le bord de l'onglet, le haut de la barre de navigation et un quart de cercle. La
+/// forme est étoilée depuis le coin de l'onglet, premier point du chemin : le remplissage en
+/// éventail d'epaint (prévu pour les polygones convexes) reste exact. Les bords droits
+/// (pied et flanc) sont rentrés d'un demi-pixel : l'anticrénelage d'epaint déborde d'un
+/// demi-pixel hors du polygone et ajouterait sinon un liseré plus clair sur la barre de
+/// navigation et sur l'onglet, déjà de cette couleur.
+fn flare(tab: Rect, side: f32, fill: Color32) -> egui::Shape {
+    const R: f32 = 8.0;
+    const STEPS: usize = 8;
+    let x = if side < 0.0 { tab.left() } else { tab.right() } + side * 0.5;
+    let b = tab.bottom() - 0.5;
+    let center = pos2(x + side * R, b - R);
+    let mut points = Vec::with_capacity(STEPS + 2);
+    points.push(pos2(x, b));
+    // Du pied (sur la barre de navigation) jusqu'au bord de l'onglet.
+    for k in 0..=STEPS {
+        let a = std::f32::consts::FRAC_PI_2 * k as f32 / STEPS as f32;
+        points.push(pos2(center.x - side * R * a.sin(), center.y + R * a.cos()));
+    }
+    egui::Shape::Path(egui::epaint::PathShape::convex_polygon(
+        points,
+        fill,
+        egui::Stroke::NONE,
+    ))
 }
 
 /// Icône et titre d'un onglet.

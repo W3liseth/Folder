@@ -115,6 +115,7 @@ impl SettingsApp {
         }
         let mut vs = ViewState::new(accent);
         vs.system_accent = system_accent;
+        vs.system_accent_neutral = theme::system_accent_is_neutral();
         if notes {
             vs.settings_section = crate::view::settings::UPDATES;
             vs.settings_notes = true;
@@ -164,6 +165,7 @@ impl SettingsApp {
             threads: 0,
         };
         f.vs.wheel.frame(&ctx);
+        crate::view::refresh_system_transparency(f.vs);
         crate::view::settings::page(ui, &mut f);
         let msgs = std::mem::take(&mut f.msgs);
         for m in msgs {
@@ -212,9 +214,19 @@ impl SettingsApp {
             }
         }
         // Les effets reviennent à la fenêtre principale (écritures), sauf la recherche de
-        // mise à jour, faite ici pour en afficher le résultat.
+        // mise à jour, faite ici pour en afficher le résultat, et l'ouverture d'une page des
+        // Paramètres de Windows (ShellExecute, sur un thread : jamais sur le thread UI).
         for effect in fx_app::update(&mut self.state, msg) {
-            if let fx_app::Effect::CheckUpdate { force, .. } = effect {
+            if let fx_app::Effect::Open(target) = effect {
+                let _ = std::thread::Builder::new()
+                    .name("folder-open".into())
+                    .spawn(move || {
+                        let _com = fx_win::com::init_sta();
+                        if let Err(e) = fx_win::shell::open(&target) {
+                            tracing::warn!(error = %e, "ouverture des Paramètres de Windows");
+                        }
+                    });
+            } else if let fx_app::Effect::CheckUpdate { force, .. } = effect {
                 let (paths, tx, ctx) = (self.paths.clone(), self.updates.0.clone(), ctx.clone());
                 let _ = std::thread::Builder::new()
                     .name("folder-update".into())

@@ -5,6 +5,25 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.9.0 — 2026-10-31
+
+- Fond Acrylic (Windows 11) : l'arrière-plan de la fenêtre devient translucide et flouté,
+  sur le cadre comme dans la liste. Actif par défaut ; Paramètres › Apparence › Effet de
+  transparence le coupe, avec un fondu (pas de clignotement). Le flou reste visible quand
+  folder n'a pas le focus.
+- L'effet suit les « Effets de transparence » de Windows : désactivés, folder garde son
+  fond opaque, et Paramètres propose un bouton « Activer dans Windows ». Les activer dans
+  Windows fait apparaître l'Acrylic sans relancer folder.
+- Interface retravaillée : titres de section et en-têtes de colonnes en casse normale
+  (« Accès rapide », « Nom », « Modifié le »…), textes discrets plus lisibles, arrondis
+  homogènes, onglet actif d'un seul tenant avec la barre de navigation.
+- Couleur d'accentuation : si celle de Windows est grise, folder utilise le bleu de Windows
+  (bouton Nouveau, sélection, indicateurs) au lieu d'une interface sans couleur.
+- Accueil : les tuiles occupent toute la largeur ; « Accès rapide » et « Fichiers récents »
+  vides affichent une explication.
+- Grandes icônes : les noms longs passent à la ligne entre les mots, comme dans
+  l'Explorateur.
+
 ## 0.8.1 — 2026-10-30
 
 - Mises à jour proposées plus vite : folder vérifie chaque heure (au lieu d'une fois par

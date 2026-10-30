@@ -96,10 +96,10 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                         12.0,
                     );
                     ui.painter()
-                        .rect_filled(rect, 10.0, fill.gamma_multiply(sel));
+                        .rect_filled(rect, 8.0, fill.gamma_multiply(sel));
                     ui.painter().rect_stroke(
                         rect,
-                        10.0,
+                        8.0,
                         egui::Stroke::new(1.0, pal.accent.gamma_multiply(0.7 * sel)),
                         egui::StrokeKind::Inside,
                     );
@@ -113,7 +113,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                 }
                 if !selected && hover > 0.0 {
                     ui.painter()
-                        .rect_filled(rect, 6.0, pal.hover.gamma_multiply(hover));
+                        .rect_filled(rect, 8.0, pal.hover.gamma_multiply(hover));
                 }
                 let dim = e.meta.flags.contains(EntryFlags::HIDDEN);
                 let tint = if dim {
@@ -181,7 +181,9 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
                     );
                     job.halign = egui::Align::Center;
                     job.wrap.max_rows = 2;
-                    job.wrap.break_anywhere = true;
+                    // Coupure entre les mots, comme l'Explorateur (egui coupe quand même un
+                    // mot trop long pour la tuile, de préférence après un tiret ou un point).
+                    job.wrap.break_anywhere = false;
                     let galley = ui.painter().layout_job(job);
                     ui.painter()
                         .galley(pos2(label.center().x, label.top()), galley, pal.text);

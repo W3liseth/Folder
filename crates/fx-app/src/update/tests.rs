@@ -226,6 +226,13 @@ fn stale_generation_is_ignored_and_previous_is_cancelled() {
 }
 
 #[test]
+fn system_settings_page_opens_through_the_shell() {
+    let mut s = state();
+    let fx = update(&mut s, Msg::OpenSystemSettings("ms-settings:colors"));
+    assert!(matches!(&fx[..], [Effect::Open(f)] if f == Path::new("ms-settings:colors")));
+}
+
+#[test]
 fn activate_dir_navigates_and_file_opens() {
     let mut s = state();
     open(&mut s, r"C:\a", &[("sub", true), ("f.txt", false)]);

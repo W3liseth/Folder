@@ -107,18 +107,18 @@ sont décrits dans [CLAUDE.md](CLAUDE.md).
 
 La version de folder est celle de `[workspace.package]` dans [Cargo.toml](Cargo.toml).
 
-1. Change la version, par exemple `version = "0.8.1"`.
-2. Ajoute en tête de [CHANGELOG.md](CHANGELOG.md) une section `## 0.8.1 — <date>` avec la
+1. Change la version, par exemple `version = "0.9.0"`.
+2. Ajoute en tête de [CHANGELOG.md](CHANGELOG.md) une section `## 0.9.0 — <date>` avec la
    liste des changements (`cargo test` échoue sans elle).
 3. Pousse le commit sur `main`.
 
 Le workflow [Installeur](.github/workflows/installer.yml) construit alors l'installeur et
-crée la release `v0.8.1`, avec le tag sur ce commit et, pour description, la section de
+crée la release `v0.9.0`, avec le tag sur ce commit et, pour description, la section de
 CHANGELOG.md. Ces notes sont aussi affichées dans folder (Paramètres › Mises à jour), et les
 folder installés proposent la nouvelle version dans l'heure (dès l'ouverture de
 Paramètres › Mises à jour). La release n'existe qu'à la fin du workflow, environ 4 minutes
 après le push. Une version avec suffixe,
-comme `0.8.1-beta.1`, est publiée en préversion, et n'est pas proposée en mise à jour.
+comme `0.9.0-beta.1`, est publiée en préversion, et n'est pas proposée en mise à jour.
 Si la release existe déjà, rien n'est publié. Lancé à la main depuis l'onglet Actions, le
 workflow crée la release qui manque, ou construit seulement l'installeur.
 
@@ -126,7 +126,7 @@ Pour construire l'installeur en local, installe [Inno Setup 6](https://jrsoftwar
 puis lance :
 
 ```bash
-iscc /DAppVersion=0.8.1 installer/folder.iss
+iscc /DAppVersion=0.9.0 installer/folder.iss
 ```
 
 L'installeur est écrit dans `target\installer`.

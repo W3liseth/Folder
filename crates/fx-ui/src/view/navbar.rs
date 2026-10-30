@@ -17,7 +17,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
     egui::Panel::top("navbar")
         .exact_size(46.0)
         .show_separator_line(false)
-        .frame(Frame::new().fill(pal.layer).inner_margin(Margin {
+        .frame(Frame::new().fill(pal.chrome).inner_margin(Margin {
             left: 8,
             right: 10,
             top: 6,
@@ -64,7 +64,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     );
                     if open {
                         ui.painter()
-                            .rect_filled(r.rect.shrink(1.0), 6.0, pal.selection);
+                            .rect_filled(r.rect.shrink(1.0), 4.0, pal.selection);
                         ui.painter().text(
                             r.rect.center(),
                             Align2::CENTER_CENTER,
