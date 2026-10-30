@@ -85,6 +85,12 @@ Coût de rendu hors écran, 1080p à 4K :
 cargo run --release -p renderbench -- --tree bench-data/100k
 ```
 
+Vue « Analyser l'espace » sur un vrai dossier (coût de rendu, capture PNG facultative) :
+
+```bash
+cargo run --release -p renderbench -- --disk C:\Users --snapshot capture.png
+```
+
 Rendu partiel comparé image par image au rendu complet (défilement, survol, menus) :
 
 ```bash
@@ -118,9 +124,9 @@ Les deux moteurs coexistent : **rendu CPU par défaut**, `--renderer glow` en op
 
 | Crate | Rôle | Règle clé |
 |---|---|---|
-| `fx-core` | types de domaine (`EntryMeta`, `DirSnapshot`, tri, sélection, formats) | aucune dépendance `windows`/`egui` |
+| `fx-core` | types de domaine (`EntryMeta`, `DirSnapshot`, `DiskTree`, tri, sélection, formats) | aucune dépendance `windows`/`egui` |
 | `fx-win` | wrappers sûrs Win32/COM (énumération, `IFileOperation`, `IContextMenu`, presse-papiers, images, watch, DWM, HTTPS WinHTTP et signatures pour la mise à jour) | seul endroit avec `unsafe`, chaque bloc a `// SAFETY:` |
-| `fx-fs` | énumération en flux, service de surveillance (IOCP), recherche récursive, zip | jamais de dépendance à l'UI |
+| `fx-fs` | énumération en flux, service de surveillance (IOCP), recherche récursive, zip, analyse de l'espace (`diskscan`) et suggestions de nettoyage (`cleanup`) | jamais de dépendance à l'UI |
 | `fx-shell` | worker STA : icônes, miniatures, ouvrir / ouvrir avec / propriétés | COM en STA uniquement |
 | `fx-commands` | métadonnées des commandes (macro `commands!`), raccourcis | toute action utilisateur a un `CommandId` |
 | `fx-store` | réglages TOML, session, SQLite (étiquettes, préférences par dossier) | écritures hors thread UI |

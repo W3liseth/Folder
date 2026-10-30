@@ -447,6 +447,63 @@ impl Scheduler {
                     out.send(Msg::RecycleBinChanged);
                 });
             }
+            // Analyse de l'espace : un thread coordinateur temporaire, qui en crée au plus
+            // quatre autres pour lire les dossiers ; tous se terminent avec l'analyse.
+            Effect::ScanDisk {
+                scan,
+                root,
+                keep_from,
+                cancel,
+            } => spawn_temp("fx-scan", move || {
+                let o = out.clone();
+                let tree = fx_fs::diskscan::scan(
+                    &root,
+                    keep_from,
+                    fx_fs::diskscan::MAX_THREADS,
+                    &cancel,
+                    std::time::Duration::from_millis(250),
+                    |progress| o.send(Msg::DiskProgress { scan, progress }),
+                );
+                let result = tree.map(|t| {
+                    let s = fx_fs::cleanup::suggest(&t, &fx_fs::cleanup::Places::current());
+                    Box::new((t, s))
+                });
+                out.send(Msg::DiskScanned { scan, result });
+            }),
+            Effect::RefreshDisk {
+                scan,
+                dir,
+                known,
+                keep_from,
+            } => spawn_temp("fx-scan", move || {
+                let result = fx_fs::diskscan::refresh(&dir, &known, keep_from, &CancelToken::new())
+                    .map(Box::new);
+                out.send(Msg::DiskRefreshed { scan, dir, result });
+            }),
+            Effect::ListContents {
+                title,
+                dirs,
+                bytes,
+                permanent,
+            } => self.io(move || {
+                let mut items = Vec::new();
+                for d in &dirs {
+                    let _ = fx_win::dir::for_each_entry(d, |e| {
+                        items.push(d.join(
+                            <std::ffi::OsString as std::os::windows::ffi::OsStringExt>::from_wide(
+                                e.name,
+                            ),
+                        ));
+                        std::ops::ControlFlow::Continue(())
+                    });
+                }
+                out.send(Msg::CleanListed {
+                    title,
+                    items,
+                    bytes,
+                    permanent,
+                });
+            }),
             Effect::LoadRecycleBin { pane, generation } => self.io(move || {
                 out.send(Msg::RecycleBinLoaded {
                     pane,

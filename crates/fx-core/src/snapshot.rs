@@ -409,7 +409,7 @@ fn name_key(name: &[u8]) -> u64 {
 }
 
 /// Extension (sans le point) d'un nom de fichier, en minuscules ASCII via l'interneur.
-fn extension(name: &[u8]) -> &[u8] {
+pub(crate) fn extension(name: &[u8]) -> &[u8] {
     match name.iter().rposition(|&c| c == b'.') {
         Some(dot) if dot + 1 < name.len() && name.len() - dot <= 17 => &name[dot + 1..],
         _ => b"",

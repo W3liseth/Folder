@@ -17,6 +17,9 @@ const CHECK_EVERY: usize = 64;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EnumOptions {
     pub show_hidden: bool,
+    /// Taille sur disque (`AllocationSize`) à la place de la taille du contenu (analyse de
+    /// l'espace) : lue par `GetFileInformationByHandleEx`.
+    pub allocated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +53,12 @@ pub fn enumerate(
     let (mut total, mut batches, mut seen) = (0u32, 0u32, 0usize);
     let mut cancelled = false;
 
-    fx_win::dir::for_each_entry(dir, |e| {
+    let mut on_entry = |name: &[u16], attributes: u32, size: u64, created: i64, modified: i64| {
         seen += 1;
-        if !opts.show_hidden && e.attributes & attrs::HIDDEN != 0 {
+        if !opts.show_hidden && attributes & attrs::HIDDEN != 0 {
             return ControlFlow::Continue(());
         }
-        batch.push_utf16(e.name, e.attributes, e.size, e.created, e.modified);
+        batch.push_utf16(name, attributes, size, created, modified);
 
         let full = batch.len() >= target;
         if full || seen % CHECK_EVERY == 0 {
@@ -73,7 +76,17 @@ pub fn enumerate(
             }
         }
         ControlFlow::Continue(())
-    })?;
+    };
+    if opts.allocated {
+        let mut buf = fx_win::dir::DirBuffer::default();
+        fx_win::dir::for_each_sized_entry(dir, &mut buf, |e| {
+            on_entry(e.name, e.attributes, e.allocated, e.created, e.modified)
+        })?;
+    } else {
+        fx_win::dir::for_each_entry(dir, |e| {
+            on_entry(e.name, e.attributes, e.size, e.created, e.modified)
+        })?;
+    }
 
     if cancelled || cancel.is_cancelled() {
         return Ok(Outcome::Cancelled);

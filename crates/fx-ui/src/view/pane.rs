@@ -12,6 +12,7 @@ use crate::theme::{glyph, icon_font};
 use crate::widgets;
 
 pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
+    super::disk::prune(f);
     let state: &AppState = f.state;
     let tab = state.tab();
     let full = ui.available_rect_before_wrap().shrink2(vec2(0.0, 0.0));
@@ -136,6 +137,14 @@ fn draw_pane(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     let pal = f.pal;
     if let Location::Search { .. } = pane.location() {
         search_header(ui, f, pane);
+    }
+    if let Location::DiskUsage { .. } = pane.location() {
+        if let ListingStatus::Failed { message } = &pane.status {
+            placeholder(ui, f, glyph::ERROR, "Emplacement indisponible", message);
+        } else {
+            super::disk::draw(ui, f, pane);
+        }
+        return;
     }
     match (&pane.status, pane.location()) {
         (_, Location::Home) => home::draw(ui, f, pane.id),

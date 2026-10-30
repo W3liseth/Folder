@@ -164,6 +164,29 @@ pub enum Effect {
         rect: Option<[i32; 4]>,
     },
     EmptyRecycleBin,
+    /// Analyse de l'espace de `root` sur des threads temporaires (cf. `fx_fs::diskscan`) ;
+    /// répond par `Msg::DiskProgress` puis `Msg::DiskScanned`.
+    ScanDisk {
+        scan: u64,
+        root: PathBuf,
+        keep_from: u64,
+        cancel: CancelToken,
+    },
+    /// Relit un dossier analysé après une opération (`known` : sous-dossiers déjà dans
+    /// l'arbre, non relus).
+    RefreshDisk {
+        scan: u64,
+        dir: PathBuf,
+        known: Vec<Vec<u8>>,
+        keep_from: u64,
+    },
+    /// Liste le contenu direct de `dirs` pour un nettoyage (répond par `Msg::CleanListed`).
+    ListContents {
+        title: &'static str,
+        dirs: Vec<PathBuf>,
+        bytes: u64,
+        permanent: bool,
+    },
     /// Raccourcis système (cf. `fx_win::shortcuts`) : Windows + E ouvre folder (`win_e`),
     /// sinon la touche `open_hotkey` (si elle est valide) ouvre folder.
     SystemShortcuts {

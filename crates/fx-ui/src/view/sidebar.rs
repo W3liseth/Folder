@@ -174,6 +174,36 @@ fn content(ui: &mut Ui, f: &mut Fx<'_>) {
         if r.middle_clicked() {
             f.send(Msg::OpenInNewTab(Location::Dir(d.root.clone())));
         }
+        r.context_menu(|ui| {
+            widgets::menu_appear(ui);
+            ui.set_min_width(220.0);
+            if ui
+                .button(widgets::menu_entry(
+                    glyph::ADD,
+                    "Ouvrir dans un nouvel onglet",
+                    &f.pal,
+                ))
+                .clicked()
+            {
+                f.send(Msg::OpenInNewTab(Location::Dir(d.root.clone())));
+                ui.close();
+            }
+            if ui
+                .button(widgets::menu_entry(glyph::PIE, "Analyser l'espace", &f.pal))
+                .clicked()
+            {
+                f.send(Msg::AnalyzeSpace(d.root.clone()));
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .button(widgets::menu_entry(glyph::INFO, "Propriétés", &f.pal))
+                .clicked()
+            {
+                f.send(Msg::Properties(d.root.clone()));
+                ui.close();
+            }
+        });
         r.on_hover_text(format!("{} libres sur {}", human(d.free), human(d.total)));
     }
 

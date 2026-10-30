@@ -26,6 +26,20 @@ struct Cols {
     modified: (f32, f32),
     kind: (f32, f32),
     size: (f32, f32),
+    /// Analyse de l'espace : taille du dossier affiché (barre de proportion des lignes) ;
+    /// 0 ailleurs.
+    disk_total: u64,
+}
+
+/// Taille du dossier regardé dans une analyse de l'espace (0 hors analyse).
+fn disk_total(f: &Fx<'_>, pane: &Pane) -> u64 {
+    let fx_app::Location::DiskUsage { root, dir } = pane.location() else {
+        return 0;
+    };
+    fx_app::update::disk::scan_of(f.state, root)
+        .and_then(|s| s.tree.as_ref())
+        .and_then(|t| t.find(dir).map(|n| t.size(n)))
+        .unwrap_or(0)
 }
 
 /// Largeurs [Nom, Date, Type, Taille] ; Nom à 0 : automatique. Pendant un redimensionnement,
@@ -64,6 +78,7 @@ fn layout(rect: Rect, w: [f32; 4], compact: bool) -> Cols {
             modified: (right, right),
             kind: (right, right),
             size: (right, right),
+            disk_total: 0,
         };
     }
     let others = w[1] + w[2] + w[3];
@@ -83,6 +98,33 @@ fn layout(rect: Rect, w: [f32; 4], compact: bool) -> Cols {
         modified,
         kind,
         size,
+        disk_total: 0,
+    }
+}
+
+/// Analyse de l'espace : colonnes proportionnelles à la largeur (pas de réglage par
+/// glissement), Taille large pour sa barre de proportion. Quand la place manque, la date
+/// puis le type disparaissent ; la taille, qui fait l'intérêt de la vue, reste.
+fn disk_layout(rect: Rect) -> Cols {
+    let right = rect.right() - PAD;
+    let left = rect.left() + PAD;
+    let avail = right - left;
+    let size_w = (avail * 0.2).clamp(110.0, 240.0);
+    let mut date_w = (avail * 0.16).clamp(120.0, 170.0);
+    let mut type_w = (avail * 0.16).clamp(110.0, 190.0);
+    if avail - size_w - date_w - type_w < MIN_NAME {
+        date_w = 0.0;
+    }
+    if avail - size_w - type_w < MIN_NAME {
+        type_w = 0.0;
+    }
+    let name_end = (right - size_w - type_w - date_w).max(left);
+    Cols {
+        name: (left, name_end),
+        modified: (name_end, name_end + date_w),
+        kind: (name_end + date_w, name_end + date_w + type_w),
+        size: (right - size_w, right),
+        disk_total: 0,
     }
 }
 
@@ -94,9 +136,15 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, compact: bool) {
     let Some(listing) = &pane.listing else { return };
     let w = widths(ui, f);
     let full = ui.available_rect_before_wrap();
-    let cols = layout(full, w, compact);
+    let disk = matches!(pane.location(), fx_app::Location::DiskUsage { .. });
+    let mut cols = if disk && !compact {
+        disk_layout(full)
+    } else {
+        layout(full, w, compact)
+    };
+    cols.disk_total = disk_total(f, pane);
     if !compact {
-        header(ui, f, pane, &cols, w);
+        header(ui, f, pane, &cols, w, !disk);
     } else {
         select_all_strip(ui, f, pane);
     }
@@ -167,7 +215,9 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, compact: bool) {
     sc.width = out.inner_rect.width();
 }
 
-fn header(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, cols: &Cols, w: [f32; 4]) {
+/// `resizable` : séparateurs à glisser (largeurs enregistrées dans les réglages) ; pas dans
+/// l'analyse de l'espace, dont les colonnes suivent la largeur du volet.
+fn header(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, cols: &Cols, w: [f32; 4], resizable: bool) {
     let pal = f.pal;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::hover());
     ui.painter().hline(
@@ -235,7 +285,7 @@ fn header(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, cols: &Cols, w: [f32; 4]) {
     // moitié droite et un glissement commencé juste à droite du bord trie au lieu de
     // redimensionner.
     for (_, _, (x0, x1), _, wi) in entries {
-        if !visible((x0, x1)) {
+        if !resizable || !visible((x0, x1)) {
             continue;
         }
         let edge = x1.min(rect.right() - PAD - 2.0);
@@ -497,7 +547,25 @@ fn row(
     }
     // Appareils du réseau : pas de taille.
     let sized = !matches!(pane.location(), fx_app::Location::Network(_));
-    if !e.meta.is_dir() && sized && visible(cols.size) {
+    // Analyse de l'espace : dossiers compris (taille de leur contenu), sur une barre de
+    // proportion dans le dossier affiché.
+    let disk = cols.disk_total > 0;
+    if disk && visible(cols.size) {
+        let cell = Rect::from_x_y_ranges(
+            (cols.size.0 + 4.0)..=(cols.size.1 - 4.0),
+            (y - 9.0)..=(y + 9.0),
+        );
+        let frac = (e.meta.size as f64 / cols.disk_total as f64).clamp(0.0, 1.0) as f32;
+        if frac > 0.0 {
+            let bar = Rect::from_min_size(
+                cell.min,
+                vec2((cell.width() * frac).max(2.0), cell.height()),
+            );
+            ui.painter()
+                .rect_filled(bar, 4.0, pal.accent.gamma_multiply(0.22));
+        }
+    }
+    if (disk || !e.meta.is_dir()) && sized && visible(cols.size) {
         fmt.clear();
         // Taille lisible (Ko, Mo, Go…), comme la barre d'état.
         let _ = format::size_human(fmt, e.meta.size);

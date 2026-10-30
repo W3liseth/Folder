@@ -91,6 +91,8 @@ pub struct Pane {
     pub shell_items: HashMap<u32, String>,
     /// Dernière navigation (animation de transition côté UI).
     pub nav: NavMark,
+    /// Analyse de l'espace : page affichée (contenu, types de fichiers, récupérable).
+    pub disk_tab: crate::disk::DiskTab,
     pub(crate) cancel: Option<CancelToken>,
 }
 
@@ -114,6 +116,7 @@ impl Pane {
             recycled: HashMap::new(),
             shell_items: HashMap::new(),
             nav: NavMark::default(),
+            disk_tab: crate::disk::DiskTab::default(),
             cancel: None,
         }
     }
@@ -171,6 +174,16 @@ impl Pane {
             .filter(|&&id| sel.contains(id))
             .map(|&id| path_of(l, id))
             .collect()
+    }
+
+    /// Le seul élément sélectionné, si c'est un dossier.
+    pub fn selected_dir(&self) -> Option<PathBuf> {
+        let (l, sel) = self.active_listing()?;
+        if sel.count() != 1 {
+            return None;
+        }
+        let id = *l.visible_ids().iter().find(|&&id| sel.contains(id))?;
+        l.view(id).meta.is_dir().then(|| path_of(l, id))
     }
 }
 
@@ -340,6 +353,14 @@ pub enum Dialog {
     BulkRename {
         items: Vec<PathBuf>,
     },
+    /// Nettoyage proposé par l'analyse de l'espace : `bytes` libérés (estimation de
+    /// l'analyse).
+    ConfirmClean {
+        title: &'static str,
+        items: Vec<PathBuf>,
+        bytes: u64,
+        permanent: bool,
+    },
     Error {
         title: String,
         message: String,
@@ -384,6 +405,10 @@ pub struct AppState {
     pub recent: Vec<RecentItem>,
     /// Distributions WSL installées.
     pub wsl: Vec<String>,
+    /// Analyses de l'espace (en cours ou terminées), bornées (cf. `disk::MAX_SCANS`).
+    pub disk_scans: Vec<crate::disk::DiskScan>,
+    /// Dernière relecture de l'espace des lecteurs demandée pendant une opération.
+    pub(crate) drives_requested: Option<Instant>,
     pub tags: Tags,
     pub folder_prefs: HashMap<String, FolderPrefs>,
     /// Opérations en cours (centre d'état).
@@ -401,6 +426,8 @@ pub struct AppState {
     pub show_search: bool,
     /// Centre d'état (bouton à côté de Rechercher et de la palette).
     pub show_status_center: bool,
+    /// Choix des lecteurs à analyser (bouton à côté de la palette).
+    pub show_disk_picker: bool,
     pub show_diagnostics: bool,
     /// Menu des branches Git (bouton de la barre d'état).
     pub git_menu: Option<GitMenu>,
@@ -427,6 +454,8 @@ impl AppState {
             known: Vec::new(),
             recent: Vec::new(),
             wsl: Vec::new(),
+            disk_scans: Vec::new(),
+            drives_requested: None,
             tags,
             folder_prefs: folder_prefs
                 .into_iter()
@@ -443,6 +472,7 @@ impl AppState {
             show_palette: false,
             show_search: false,
             show_status_center: false,
+            show_disk_picker: false,
             show_diagnostics: false,
             git_menu: None,
             update: crate::upgrade::Status::Unknown,
@@ -511,6 +541,14 @@ impl AppState {
 
     /// Tri d'un dossier : préférences mémorisées pour ce dossier, sinon tri par nom.
     pub fn sort_for(&self, loc: &Location) -> SortSpec {
+        // Analyse de l'espace : du plus gros au plus petit, dossiers et fichiers mêlés.
+        if let Location::DiskUsage { .. } = loc {
+            return SortSpec {
+                key: SortKey::Size,
+                dir: SortDir::Desc,
+                folders_first: false,
+            };
+        }
         let base = SortSpec {
             folders_first: self.settings.folders_first,
             ..SortSpec::default()
@@ -546,11 +584,15 @@ impl AppState {
         CommandContext {
             selection: selected.len(),
             has_location: pane.working_dir().is_some(),
+            has_listing: pane.active_listing().is_some(),
             can_back: pane.history.can_go_back(),
             can_forward: pane.history.can_go_forward(),
             can_up: matches!(
                 pane.location(),
-                Location::Dir(_) | Location::Search { .. } | Location::Network(Some(_))
+                Location::Dir(_)
+                    | Location::Search { .. }
+                    | Location::Network(Some(_))
+                    | Location::DiskUsage { .. }
             ),
             clipboard_has_files: self.clipboard_has_files,
             can_undo: self.undo.can_undo(),

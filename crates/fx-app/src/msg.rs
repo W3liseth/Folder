@@ -241,6 +241,49 @@ pub enum Msg {
     },
     WslLoaded(Vec<String>),
 
+    // --- Analyse de l'espace (cf. `disk`) ---
+    /// Analyse `path` dans le volet actif (une analyse déjà ouverte qui le contient est
+    /// reprise).
+    AnalyzeSpace(PathBuf),
+    /// Lecteurs choisis dans le menu d'analyse : le premier dans le volet actif, les
+    /// suivants chacun dans un nouvel onglet.
+    AnalyzeDrives(Vec<PathBuf>),
+    DiskTab {
+        pane: PaneId,
+        tab: crate::disk::DiskTab,
+    },
+    /// Relance l'analyse de `root` (relecture complète).
+    DiskRescan(PathBuf),
+    DiskCancel(PathBuf),
+    /// Quitte l'analyse : le volet revient au dossier regardé.
+    CloseDiskUsage(PaneId),
+    /// Nettoyage de la suggestion `index` de l'analyse de `root` (après confirmation).
+    DiskClean {
+        root: PathBuf,
+        index: usize,
+    },
+    DiskProgress {
+        scan: u64,
+        progress: fx_fs::diskscan::ScanProgress,
+    },
+    /// Fin d'une analyse ; `None` : annulée.
+    DiskScanned {
+        scan: u64,
+        result: Option<Box<(fx_core::DiskTree, Vec<fx_fs::cleanup::Suggestion>)>>,
+    },
+    DiskRefreshed {
+        scan: u64,
+        dir: PathBuf,
+        result: Option<Box<fx_fs::diskscan::Refreshed>>,
+    },
+    /// Contenu des dossiers à nettoyer, listé : confirmation demandée.
+    CleanListed {
+        title: &'static str,
+        items: Vec<PathBuf>,
+        bytes: u64,
+        permanent: bool,
+    },
+
     // --- Mise à jour (cf. `upgrade`) ---
     /// Recherche une nouvelle version ; `force` (demande explicite) ignore le résultat du
     /// jour et annonce le résultat, quel qu'il soit.

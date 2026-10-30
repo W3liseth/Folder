@@ -326,7 +326,8 @@ folder/                      (application « folder », anciennement « fx »)
 │  ├─ fx-core/               types de domaine purs, sans I/O ni unsafe (instantané, tri, sélection, formats)
 │  ├─ fx-win/                SEULE crate avec `unsafe` Win32/COM (wrappers sûrs) : énumération,
 │  │                         IFileOperation, IContextMenu, presse-papiers, images shell, watch IOCP, DWM
-│  ├─ fx-fs/                 énumération en flux, service de surveillance, recherche récursive, archives zip
+│  ├─ fx-fs/                 énumération en flux, service de surveillance, recherche récursive, archives zip,
+│  │                         analyse de l'espace et suggestions de nettoyage
 │  ├─ fx-shell/              worker STA unique : icônes, miniatures, ouvrir/ouvrir avec/propriétés
 │  ├─ fx-commands/           métadonnées des commandes (libellé, glyphe, raccourcis), raccourcis clavier
 │  ├─ fx-store/              réglages TOML, session, SQLite (étiquettes, préférences par dossier)
@@ -710,6 +711,97 @@ Seule requête réseau que folder fait sans qu'on ouvre un emplacement réseau ;
   première section doit être la version de Cargo.toml (test `notes_cover_every_version`).
   Le workflow Installeur en tire la description de la release.
 
+### 7.13 Analyse de l'espace (`fx-fs::diskscan`, `fx-fs::cleanup`, `fx-app::disk`)
+
+Voir ce qui occupe un lecteur ou un dossier et libérer la place, à la WinDirStat. Décision
+du 2026-10-30 : un emplacement de volet (pas une fenêtre à part), taille **sur disque**,
+suggestions de nettoyage dès la première version.
+
+- **Emplacement** `Location::DiskUsage { root, dir }` : l'analyse de `root`, regardée dans
+  `dir`. Ouvrir un dossier, remonter, le fil d'Ariane ou un chemin saisi restent dans
+  l'analyse tant qu'on est sous `root` (`update::disk::redirect`, sur toute navigation qui
+  ajoute à l'historique) ; « Fermer l'analyse » ouvre `dir` normalement. Non restauré avec
+  la session. Points d'entrée : commande « Analyser l'espace » (`Ctrl+Maj+A` : dossier
+  sélectionné, sinon dossier affiché, sinon lecteur système), menus contextuels d'un dossier
+  et du fond, lecteurs de la barre latérale et de l'accueil, et le bouton de la barre de
+  navigation (à côté de la palette, commande « Analyser des lecteurs… »,
+  `fx-ui::view::diskpicker`) : menu de cases à cocher des lecteurs (jauge, place libre,
+  « déjà analysé » ; lecteur système coché à la première ouverture) et du dossier affiché.
+  Plusieurs lecteurs : le premier dans le volet actif, chacun des autres dans un nouvel
+  onglet, analyses en parallèle (`Msg::AnalyzeDrives`).
+- **Taille sur disque** : `AllocationSize` de `GetFileInformationByHandleEx(FileFullDirectoryInfo)`
+  (`fx_win::dir::for_each_sized_entry`, tampon de 64 Ko par thread). Un fichier cloud non
+  téléchargé compte 0, un fichier compressé sa taille compressée : c'est ce qu'on libère.
+  Points d'analyse (jonctions, liens, points de montage) non suivis, comme l'Explorateur.
+  Les liens physiques (WinSxS) sont comptés à chaque nom, comme WinDirStat.
+- **Parcours** : un thread coordinateur temporaire (`fx-scan`), seul à écrire l'arbre, et au
+  plus 4 threads de lecture temporaires (`std::thread::scope`, pile de 256 Ko), file en
+  profondeur sous `Mutex` + `Condvar` ; tous se terminent avec l'analyse (threads au repos
+  inchangés). Annulable (`CancelToken`, vérifié entre deux dossiers et tous les 4 096
+  éléments). Avancement toutes les 250 ms (`Msg::DiskProgress` : totaux, dossier courant,
+  premier niveau) ; la vue l'affiche à la place de la liste.
+- **Arbre** `fx_core::DiskTree` (structure de tableaux, nœuds de 48 octets, noms WTF-8 dans
+  une arène) : un nœud par dossier, par fichier gardé, et un nœud « petits fichiers » par
+  dossier. Un fichier est gardé à partir d'un 200 000ᵉ de l'espace occupé du lecteur
+  (entre 4 Kio et 1 Mio ; 64 Kio pour un dossier), seuil relevé à 1 Mio au-delà de 100 000
+  fichiers gardés ; seuls leurs noms entrent dans l'arène. Plafond de 1 000 000 de nœuds :
+  au-delà, le contenu des nouveaux dossiers est compté dans leur parent (totaux exacts).
+  Mesuré : profil utilisateur de 1,67 million de fichiers (535 Go) → 490 000 nœuds,
+  28 Mo, 11 s à chaud. Au-delà de 2 analyses (`disk::MAX_SCANS`), celles qu'aucun volet
+  n'affiche sont libérées, de la plus ancienne à la plus récente (les analyses affichées,
+  plusieurs lecteurs par exemple, restent) ; mémoire visible dans F12.
+- **Liste** : le vrai contenu du dossier (`Effect::Enumerate` avec `allocated` et les
+  éléments masqués), les dossiers prenant la taille de l'analyse au fil des lots
+  (`update::disk::patch_batch`) ; tri par taille décroissante, dossiers et fichiers mêlés ;
+  barre de proportion dans la colonne Taille. Sélection, menu contextuel, suppression et
+  glisser fonctionnent donc comme ailleurs. Pas de surveillance : les notifications
+  donneraient la taille du contenu.
+- **Carte proportionnelle** (treemap « squarified », relief en coussin) du dossier regardé,
+  au-dessus de la liste : couleur par extension (les 12 plus gourmandes), gris pour les
+  petits fichiers. Calculée en pixels physiques dans une image (`fx-ui::view::disk`) quand
+  l'arbre, le dossier ou la taille changent ; les tuiles de moins de 36 points² ne sont pas
+  subdivisées. L'image, calée sur la grille des pixels et une colonne plus large que la
+  zone affichée, suivie d'un triangle vide dans son maillage, prend le chemin de recopie
+  directe du moteur CPU (sinon : deux triangles échantillonnés, ~7 ms en 1080p). Survol :
+  contour et info-bulle ; clic : sélection dans la liste ; double-clic : ouvrir le dossier.
+- **Mise en page adaptée à la fenêtre** : la carte prend 45 % de la hauteur du volet
+  (séparateur déplaçable entre 12 et 85 %, double-clic : retour à 45 %), la liste gardant
+  au moins son en-tête et trois lignes. Pendant un redimensionnement, l'image en place est
+  étirée et les tuiles mises à l'échelle ; disposition et image ne sont recalculées
+  qu'une fois la taille stable depuis 120 ms. Sous 760 points de large (petite fenêtre,
+  double volet) : résumé sur une seconde ligne, libellés raccourcis, titre tronqué ; la
+  page Types masque la description puis le nombre de fichiers. Colonnes de la liste
+  proportionnelles à la largeur du volet (`list::disk_layout`, sans séparateurs à glisser,
+  les réglages de largeur des autres vues n'y s'appliquent pas) ; la date puis le type
+  disparaissent quand la place manque, la taille reste toujours visible.
+- **Pages** : Contenu (carte + liste), Types de fichiers (place par extension, état à la
+  fin de l'analyse), Récupérable (suggestions).
+- **Suggestions** (`fx_fs::cleanup::suggest`, calculées avec l'arbre) : corbeille ;
+  contenu des dossiers temporaires, de `SoftwareDistribution\Download`, des rapports
+  d'erreur, des caches de navigateurs (Chrome, Edge, Brave, Firefox) et de paquets (npm,
+  pip, Yarn, NuGet, pnpm, Cargo, Gradle) ; `Windows.old` ; dossiers `node_modules` et
+  marqués `CACHEDIR.TAG` (cible Cargo…) de plus de 50 Mo ; fichiers de plus de 100 Mo
+  dans Téléchargements ; fichiers de plus de 1 Go non modifiés depuis un an (hors Windows,
+  Program Files, ProgramData, fichiers de pagination). Régénérables : supprimés
+  définitivement (les mettre à la corbeille ne libérerait rien) ; données de l'utilisateur :
+  mises à la corbeille. Toujours après confirmation (`Dialog::ConfirmClean`, place libérée
+  et éléments), par `IFileOperation` dans le centre d'état ; le contenu d'un dossier est
+  listé au moment du nettoyage (`Effect::ListContents`), les éléments en cours d'utilisation
+  sont ignorés.
+- **Après une opération** (de folder) touchant un dossier analysé : son parent est relu
+  sans récursion (`Effect::RefreshDisk` → `DiskTree::refresh` : fichiers recomptés,
+  sous-dossiers disparus retirés, nouveaux lus en entier), ainsi que la corbeille du
+  lecteur ; les suggestions et les volets suivent. Les changements faits hors de folder
+  attendent « Relancer ». La place libre des lecteurs (barre latérale, accueil, barre du
+  volume) est relue à la fin de chaque opération, au plus une fois par seconde pendant une
+  longue opération, et quand la corbeille est vidée ; une mise à la corbeille ne libère
+  rien tant qu'elle n'est pas vidée, ce que rappelle la confirmation dans l'analyse.
+- **Sélection** : « Tout sélectionner » et « Inverser la sélection » dépendent de la
+  présence d'une liste (`CommandContext::has_listing`), plus d'un dossier où créer : ils
+  marchent dans l'analyse, la corbeille et les résultats de recherche.
+- **Coût du rendu** (`renderbench --disk`, 1080p) : 0,5 ms par image au survol (rendu
+  partiel), 3,3 à 4,5 ms pour une image complète (2,6 ms pour la liste seule).
+
 ---
 
 ## 8. Mesure et vérification des performances
@@ -909,6 +1001,9 @@ télémétrie distante.
   ressource 1 de l'exécutable, posée sur chaque fenêtre (`WM_SETICON`). Version de
   l'exécutable (propriétés du fichier) : celle de `Cargo.toml`, insérée par `build.rs` dans
   une copie de `folder.rc`.
+- **Analyse de l'espace** (§7.13) : carte proportionnelle, liste par taille sur disque,
+  types de fichiers, suggestions de nettoyage avec suppression confirmée, mise à jour après
+  les opérations de folder.
 - **Raccourcis système** (Paramètres › Raccourcis › Système, `fx_win::shortcuts`), actifs
   même folder fermé, appliqués sur le thread shell quand le réglage change :
   « Windows + E ouvre folder » inscrit le processus résident `folder.exe --win-e`
@@ -973,7 +1068,7 @@ télémétrie distante.
   de l'Explorateur ou d'une autre fenêtre folder : mêmes cibles, suivies par la position du
   curseur lue à Windows (aucun message de souris pendant un glisser OLE).
 - **Recherche** : filtre instantané et recherche récursive diffusée dans un dossier virtuel.
-- **Commandes** : 64 commandes avec raccourcis, palette (`Ctrl+Maj+P`), menus de la barre
+- **Commandes** : 73 commandes avec raccourcis, palette (`Ctrl+Maj+P`), menus de la barre
   d'outils ; réglages (thème, affichage, comportement, raccourcis) ; étiquettes colorées ;
   diagnostics (F12 : temps d'image, mémoire, caches).
 - **Fenêtre** : barre de titre personnalisée (onglets), cadre DWM (coins arrondis, ombre),
@@ -1050,7 +1145,8 @@ télémétrie distante.
 - **Threads** (§6.2) : 12 au total — UI, pool I/O (2), worker shell STA (icônes, miniatures
   en LIFO, actions shell), watcher IOCP, threads du moteur et du système. Les opérations
   fichiers, la recherche et les boîtes modales natives utilisent un thread temporaire qui
-  se termine avec elles ; la persistance passe par le pool I/O (pas de thread dédié).
+  se termine avec elles (l'analyse de l'espace : un coordinateur et au plus 4 lecteurs,
+  §7.13) ; la persistance passe par le pool I/O (pas de thread dédié).
   Les extensions shell tierces chargées à la demande (menu contextuel, état de
   synchronisation sur un lecteur cloud) peuvent créer leurs propres threads. La mise à jour
   (§7.12) ajoute un thread temporaire au démarrage, terminé en quelques millisecondes quand

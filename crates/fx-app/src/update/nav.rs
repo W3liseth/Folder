@@ -82,6 +82,22 @@ pub fn load(
     loc: Location,
     push_history: bool,
 ) -> Vec<Effect> {
+    // Ouvrir un dossier depuis une analyse de l'espace y reste (sous sa racine).
+    let loc = if push_history {
+        super::disk::redirect(state, pane_id, loc)
+    } else {
+        loc
+    };
+    load_with(state, pane_id, loc, push_history, None)
+}
+
+/// Comme [`load`], sans rester dans l'analyse de l'espace (la quitter).
+pub fn load_exact(
+    state: &mut AppState,
+    pane_id: PaneId,
+    loc: Location,
+    push_history: bool,
+) -> Vec<Effect> {
     load_with(state, pane_id, loc, push_history, None)
 }
 
@@ -115,6 +131,15 @@ fn load_with(
     let tagged = match &loc {
         Location::Tag(t) => state.tags.paths_with(*t),
         _ => Vec::new(),
+    };
+    // Analyse de l'espace : lancée au besoin ; la liste attend qu'elle soit terminée.
+    let mut fx = Vec::new();
+    let disk_ready = match &loc {
+        Location::DiskUsage { root, .. } => {
+            fx.extend(super::disk::ensure_scan(state, root));
+            super::disk::scan_of(state, root).is_some_and(|s| s.tree.is_some())
+        }
+        _ => false,
     };
     if state.renaming.is_some_and(|r| r.pane == pane_id) {
         state.renaming = None;
@@ -155,8 +180,37 @@ fn load_with(
     pane.shell_items.clear();
     let key = pane.id.0;
     let cancel = CancelToken::new();
-    let mut fx = Vec::new();
     match &loc {
+        Location::DiskUsage { dir, .. } => {
+            pane.layout = Layout::Details;
+            fx.push(Effect::Unwatch { key });
+            if disk_ready {
+                // Contenu réel du dossier (tout, éléments masqués compris, avec leur taille
+                // sur disque) ; les dossiers prennent la taille de l'analyse.
+                pane.incoming = Some(DirSnapshot::new(dir.clone(), generation, sort));
+                pane.status = ListingStatus::Loading {
+                    started: Instant::now(),
+                };
+                pane.cancel = Some(cancel.clone());
+                fx.push(Effect::Enumerate {
+                    pane: pane_id,
+                    generation,
+                    path: dir.clone(),
+                    options: EnumOptions {
+                        show_hidden: true,
+                        allocated: true,
+                    },
+                    cancel,
+                    target: Target::Pane,
+                });
+            } else {
+                // Analyse en cours : la vue montre son avancement.
+                pane.listing = None;
+                pane.incoming = None;
+                pane.selection.clear();
+                pane.status = ListingStatus::Idle;
+            }
+        }
         Location::Home => {
             pane.listing = None;
             pane.incoming = None;
@@ -176,7 +230,10 @@ fn load_with(
                 pane: pane_id,
                 generation,
                 path: path.clone(),
-                options: EnumOptions { show_hidden },
+                options: EnumOptions {
+                    show_hidden,
+                    ..EnumOptions::default()
+                },
                 cancel,
                 target: Target::Pane,
             });
@@ -534,7 +591,10 @@ pub fn column_click(
             pane: pane_id,
             generation,
             path,
-            options: EnumOptions { show_hidden },
+            options: EnumOptions {
+                show_hidden,
+                ..EnumOptions::default()
+            },
             cancel,
             target: Target::Column,
         });

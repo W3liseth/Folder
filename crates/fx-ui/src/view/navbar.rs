@@ -44,9 +44,9 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     }
                 }
                 ui.add_space(6.0);
-                // Rechercher, palette de commandes et centre d'état : boutons ouvrant chacun
-                // leur fenêtre.
-                let omni_w = ui.available_width() - 3.0 * size.x - 10.0;
+                // Rechercher, palette de commandes, analyse de l'espace et centre d'état :
+                // boutons ouvrant chacun leur fenêtre.
+                let omni_w = ui.available_width() - 4.0 * size.x - 10.0;
                 omnibar(ui, f, omni_w);
                 ui.add_space(6.0);
                 for (cmd, open) in [
@@ -77,6 +77,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                         f.cmd(cmd);
                     }
                 }
+                super::diskpicker::button(ui, f, size);
                 super::statuscenter::button(ui, f, size);
             });
         });
@@ -182,7 +183,9 @@ fn omnibar(ui: &mut Ui, f: &mut Fx<'_>, width: f32) {
                 egui::RichText::new(format!("›  Résultats pour « {query} »")).color(pal.text2),
             );
         }
-        Location::Dir(p) => crumbs(&mut ui, f, &p, inner.width()),
+        Location::Dir(p) | Location::DiskUsage { dir: p, .. } => {
+            crumbs(&mut ui, f, &p, inner.width());
+        }
         Location::RecycleBin => crumb_shell(&mut ui, f, &Location::RecycleBin, glyph::RECYCLE),
         Location::Network(None) => {
             crumb_shell(&mut ui, f, &Location::Network(None), glyph::NETWORK);

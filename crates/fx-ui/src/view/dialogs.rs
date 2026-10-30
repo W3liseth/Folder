@@ -56,6 +56,12 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                     "Vider",
                 ),
                 Dialog::BulkRename { items } => bulk_rename(ui, f, items),
+                Dialog::ConfirmClean {
+                    title,
+                    items,
+                    bytes,
+                    permanent,
+                } => confirm_clean(ui, f, title, items, *bytes, *permanent),
                 Dialog::Error { title, message } => {
                     header(ui, f, glyph::ERROR, title);
                     ui.label(message);
@@ -125,6 +131,72 @@ fn confirm(ui: &mut Ui, f: &mut Fx<'_>, g: &str, title: &str, text: &str, action
     });
 }
 
+/// Nettoyage proposé par l'analyse de l'espace : place libérée et éléments concernés.
+fn confirm_clean(
+    ui: &mut Ui,
+    f: &mut Fx<'_>,
+    title: &str,
+    items: &[PathBuf],
+    bytes: u64,
+    permanent: bool,
+) {
+    let mut size = String::new();
+    let _ = fx_core::format::size_human(&mut size, bytes);
+    header(ui, f, glyph::BROOM, &format!("Nettoyer « {title} » ?"));
+    let what = match items.len() {
+        1 => "1 élément".to_owned(),
+        n => format!("{n} éléments"),
+    };
+    let text = if permanent {
+        format!(
+            "{what}, environ {size}. Suppression définitive : ils ne passeront pas par la \
+             corbeille. Les éléments en cours d'utilisation seront ignorés."
+        )
+    } else {
+        format!(
+            "{what}, environ {size}, mis à la corbeille : la place n'est libérée qu'une fois \
+             la corbeille vidée."
+        )
+    };
+    ui.label(RichText::new(text).color(f.pal.text2));
+    ui.add_space(6.0);
+    egui::ScrollArea::vertical()
+        .max_height(140.0)
+        .show(ui, |ui| {
+            for p in items.iter().take(100) {
+                ui.label(
+                    RichText::new(p.display().to_string())
+                        .size(12.0)
+                        .color(f.pal.text2),
+                );
+            }
+            if items.len() > 100 {
+                ui.label(
+                    RichText::new(format!("… et {} autres", items.len() - 100))
+                        .size(12.0)
+                        .color(f.pal.text3),
+                );
+            }
+        });
+    ui.add_space(14.0);
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if ui
+            .add(egui::Button::new("Annuler").min_size(vec2(100.0, 32.0)))
+            .clicked()
+        {
+            f.send(Msg::CancelDialog);
+        }
+        let action = if permanent {
+            "Supprimer"
+        } else {
+            "Mettre à la corbeille"
+        };
+        if primary(ui, f, action, true).clicked() {
+            f.send(Msg::ConfirmDialog);
+        }
+    });
+}
+
 fn confirm_delete(ui: &mut Ui, f: &mut Fx<'_>, items: &[PathBuf], permanent: bool) {
     let what = match items {
         [one] => format!("« {} »", name(one)),
@@ -137,6 +209,14 @@ fn confirm_delete(ui: &mut Ui, f: &mut Fx<'_>, items: &[PathBuf], permanent: boo
     };
     let text = if permanent {
         "Cette action est définitive : les éléments ne passeront pas par la corbeille."
+    } else if matches!(
+        f.state.pane().location(),
+        fx_app::Location::DiskUsage { .. }
+    ) {
+        // Dans l'analyse de l'espace, on supprime pour faire de la place : la corbeille la
+        // garde occupée.
+        "Les éléments seront placés dans la corbeille : la place n'est libérée qu'une fois \
+         la corbeille vidée (Maj+Suppr supprime définitivement)."
     } else {
         "Les éléments seront placés dans la corbeille."
     };

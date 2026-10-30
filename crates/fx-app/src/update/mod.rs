@@ -2,6 +2,7 @@
 //! Tout travail coûteux est renvoyé sous forme d'[`Effect`].
 
 mod commands;
+pub mod disk;
 mod edit;
 mod nav;
 mod results;
@@ -229,6 +230,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
         Msg::TogglePalette => {
             state.show_palette = !state.show_palette;
             state.show_status_center = false;
+            state.show_disk_picker = false;
             vec![]
         }
         Msg::ConsumeRequests => {
@@ -239,6 +241,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             state.show_palette = false;
             state.show_search = false;
             state.show_status_center = false;
+            state.show_disk_picker = false;
             state.git_menu = None;
             vec![]
         }
@@ -377,7 +380,29 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             generation,
             items,
         } => results::recycle_loaded(state, pane, generation, items),
-        Msg::RecycleBinChanged => results::reload_recycle_bins(state),
+        Msg::RecycleBinChanged => {
+            // Corbeille vidée : la place est rendue aux lecteurs.
+            let mut fx = results::reload_recycle_bins(state);
+            fx.extend(disk::recycle_changed(state));
+            fx.push(Effect::LoadDrives);
+            fx
+        }
+        Msg::AnalyzeSpace(path) => disk::analyze(state, path),
+        Msg::AnalyzeDrives(roots) => disk::analyze_many(state, roots),
+        Msg::DiskTab { pane, tab } => disk::set_tab(state, pane, tab),
+        Msg::DiskRescan(root) => disk::rescan(state, &root),
+        Msg::DiskCancel(root) => disk::cancel(state, &root),
+        Msg::CloseDiskUsage(pane) => disk::close(state, pane),
+        Msg::DiskClean { root, index } => disk::clean(state, &root, index),
+        Msg::DiskProgress { scan, progress } => disk::progress(state, scan, progress),
+        Msg::DiskScanned { scan, result } => disk::scanned(state, scan, result),
+        Msg::DiskRefreshed { scan, dir, result } => disk::refreshed(state, scan, &dir, result),
+        Msg::CleanListed {
+            title,
+            items,
+            bytes,
+            permanent,
+        } => disk::clean_listed(state, title, items, bytes, permanent),
         Msg::NetworkLoaded {
             pane,
             generation,

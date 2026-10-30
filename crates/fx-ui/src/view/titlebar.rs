@@ -460,6 +460,7 @@ fn tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, loc: &Location, title: &str
         Location::Dir(_) => glyph::FOLDER,
         Location::RecycleBin => glyph::RECYCLE,
         Location::Network(_) => glyph::NETWORK,
+        Location::DiskUsage { .. } => glyph::PIE,
     };
     let gc = if matches!(loc, Location::Dir(p) if p.parent().is_some()) {
         pal.folder

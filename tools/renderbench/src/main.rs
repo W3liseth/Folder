@@ -17,6 +17,8 @@
 //! avec cache efface le tampon à chaque image (il compose son canevas par-dessus) ; les deux
 //! autres non, comme fx.
 //!
+//! `--disk <dossier>` : vue « Analyser l'espace » (cf. `disk.rs`).
+//!
 //! `--verify` : défilements variés (bas, haut, petits pas, arrêts), survol, clics, Ctrl+A et
 //! menu contextuel simulés ; chaque image du mode partiel est comparée pixel à pixel à un
 //! rendu complet. Code de sortie 1 au moindre écart.
@@ -80,7 +82,12 @@ impl Mode {
     }
 }
 
+mod disk;
+
 fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "--disk") {
+        return disk::main();
+    }
     let (tree, frames, verify) = parse_args()?;
     if verify {
         return verify_all(&tree, frames);

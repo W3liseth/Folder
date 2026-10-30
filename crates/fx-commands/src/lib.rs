@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 pub struct CommandContext {
     pub selection: usize,
     pub has_location: bool,
+    /// Le volet affiche une liste (dossier, analyse de l'espace, corbeille, recherche…),
+    /// même sans dossier où créer ou coller.
+    pub has_listing: bool,
     pub can_back: bool,
     pub can_forward: bool,
     pub can_up: bool,
@@ -132,6 +135,8 @@ commands! {
     CompressToZip => Files, "Compresser en .zip", "\u{F012}", [];
     ExtractHere => Files, "Extraire ici", "\u{E8B7}", [];
     EmptyRecycleBin => Files, "Vider la corbeille", "\u{E74D}", [];
+    AnalyzeSpace => Files, "Analyser l'espace", "\u{EB05}", ["Ctrl+Shift+A"];
+    AnalyzeDrives => Files, "Analyser des lecteurs…", "\u{EB05}", [];
     Undo => Files, "Annuler", "\u{E7A7}", ["Ctrl+Z"];
     Redo => Files, "Rétablir", "\u{E7A6}", ["Ctrl+Y", "Ctrl+Shift+Z"];
     Restore => Files, "Restaurer", "\u{E777}", [];
@@ -178,9 +183,9 @@ impl CommandId {
             Back => c.can_back,
             Forward => c.can_forward,
             Up => c.can_up,
-            Refresh | Search | NewFolder | NewFile | OpenTerminal | SelectAll | InvertSelection => {
-                c.has_location
-            }
+            Search | NewFolder | NewFile | OpenTerminal => c.has_location,
+            Refresh => c.has_location || c.has_listing,
+            SelectAll | InvertSelection => c.has_listing,
             Paste => c.has_location && c.clipboard_has_files,
             Restore => c.in_recycle_bin && c.selection > 0,
             // Corbeille : seuls restaurer, supprimer définitivement et propriétés s'appliquent.
@@ -333,6 +338,16 @@ mod tests {
         let c = CommandContext { selection: 2, ..c };
         assert!(!CommandId::Rename.is_enabled(&c));
         assert!(CommandId::BulkRename.is_enabled(&c));
+        // Liste sans dossier (analyse de l'espace, corbeille, recherche) : on peut tout
+        // sélectionner, pas créer.
+        let c = CommandContext {
+            has_listing: true,
+            ..Default::default()
+        };
+        assert!(CommandId::SelectAll.is_enabled(&c));
+        assert!(CommandId::InvertSelection.is_enabled(&c));
+        assert!(!CommandId::NewFolder.is_enabled(&c));
+        assert!(!CommandId::SelectAll.is_enabled(&CommandContext::default()));
     }
 
     #[test]

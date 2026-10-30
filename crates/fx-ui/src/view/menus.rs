@@ -82,6 +82,9 @@ fn item_entries(ui: &mut Ui, f: &mut Fx<'_>, paths: &[PathBuf], is_dir: bool) {
     tags_menu(ui, f, paths);
     if is_dir {
         menu_cmd(ui, f, CommandId::PinToSidebar, "");
+        if single {
+            menu_cmd(ui, f, CommandId::AnalyzeSpace, "");
+        }
     }
     menu_cmd(ui, f, CommandId::CompressToZip, "");
     if paths
@@ -226,6 +229,17 @@ fn background_entries(ui: &mut Ui, f: &mut Fx<'_>) {
     menu_cmd(ui, f, CommandId::SelectAll, "");
     menu_cmd(ui, f, CommandId::OpenTerminal, "");
     menu_cmd(ui, f, CommandId::PinToSidebar, "Épingler ce dossier");
+    if !matches!(
+        f.state.pane().location(),
+        fx_app::Location::DiskUsage { .. }
+    ) {
+        menu_cmd(
+            ui,
+            f,
+            CommandId::AnalyzeSpace,
+            "Analyser l'espace de ce dossier",
+        );
+    }
     menu_cmd(ui, f, CommandId::Properties, "");
     if let Some(dir) = f.state.pane().working_dir() {
         more_options(ui, f, Target::Background(dir.to_path_buf()));

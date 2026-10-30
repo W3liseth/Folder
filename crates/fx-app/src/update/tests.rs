@@ -1410,3 +1410,355 @@ fn git_menu_lists_branches_and_switches() {
     update(&mut s, Msg::CloseOverlays);
     assert!(s.git_menu.is_none());
 }
+
+// --- Analyse de l'espace ---------------------------------------------------------------
+
+fn disk_listing(dirs: &[&str], files: &[(&str, u64)]) -> fx_core::DirListing {
+    use fx_core::disktree::{ListedDir, ListedFile};
+    let mut l = fx_core::DirListing::default();
+    for d in dirs {
+        let name = l.names.push_bytes(d.as_bytes());
+        l.dirs.push(ListedDir {
+            name,
+            modified: 0,
+            attributes: attrs::DIRECTORY,
+        });
+    }
+    for (f, size) in files {
+        let name = l.names.push_bytes(f.as_bytes());
+        l.files.push(ListedFile {
+            name,
+            size: *size,
+            modified: 0,
+            attributes: 0,
+        });
+    }
+    l
+}
+
+/// C:\r : a\ (gros.iso 5000), f.bin 1000.
+fn disk_tree() -> fx_core::DiskTree {
+    let mut t = fx_core::DiskTree::new(PathBuf::from(r"C:\r"), 100);
+    let a = t.insert(0, &disk_listing(&["a"], &[("f.bin", 1000)])).start;
+    t.insert(a, &disk_listing(&[], &[("gros.iso", 5000)]));
+    t.finish();
+    t
+}
+
+fn scan_id(effects: &[Effect]) -> u64 {
+    effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::ScanDisk { scan, .. } => Some(*scan),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("pas d'analyse dans {effects:?}"))
+}
+
+/// Analyse de C:\r terminée, liste du dossier racine chargée.
+fn analyzed(s: &mut AppState, suggestions: Vec<fx_fs::cleanup::Suggestion>) {
+    let fx = update(s, Msg::AnalyzeSpace(PathBuf::from(r"C:\r")));
+    let scan = scan_id(&fx);
+    let fx = update(
+        s,
+        Msg::DiskScanned {
+            scan,
+            result: Some(Box::new((disk_tree(), suggestions))),
+        },
+    );
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::Enumerate {
+            options: fx_fs::EnumOptions {
+                show_hidden: true,
+                allocated: true
+            },
+            ..
+        }
+    )));
+    let g = enum_gen(&fx);
+    feed(s, g, &[("f.bin", false), ("a", true)]);
+    done(s, g);
+}
+
+#[test]
+fn analyze_space_scans_then_lists_with_folder_sizes() {
+    let mut s = state();
+    let fx = update(&mut s, Msg::AnalyzeSpace(PathBuf::from(r"C:\r")));
+    scan_id(&fx);
+    // Pendant l'analyse : pas encore de liste.
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Enumerate { .. })));
+    assert_eq!(s.pane().status, ListingStatus::Idle);
+    s.disk_scans.clear();
+
+    analyzed(&mut s, Vec::new());
+    // Dossiers à la taille de leur contenu, du plus gros au plus petit.
+    assert_eq!(names(&s), vec!["a", "f.bin"]);
+    let l = s.pane().listing.as_ref().expect("liste");
+    assert_eq!(l.at(0).expect("a").meta.size, 5000);
+    assert_eq!(s.pane().layout, Layout::Details);
+
+    // Ouvrir un sous-dossier reste dans l'analyse, sans la relancer.
+    let fx = update(
+        &mut s,
+        Msg::Navigate(Location::Dir(PathBuf::from(r"C:\r\a"))),
+    );
+    assert!(!fx.iter().any(|e| matches!(e, Effect::ScanDisk { .. })));
+    assert_eq!(
+        s.pane().location(),
+        &Location::DiskUsage {
+            root: PathBuf::from(r"C:\r"),
+            dir: PathBuf::from(r"C:\r\a")
+        }
+    );
+    update(&mut s, Msg::Command(CommandId::Up));
+    assert!(
+        matches!(s.pane().location(), Location::DiskUsage { dir, .. } if dir == Path::new(r"C:\r"))
+    );
+    // Au-dessus de la racine, on quitte l'analyse.
+    update(&mut s, Msg::Command(CommandId::Up));
+    assert_eq!(s.pane().location(), &Location::Dir(PathBuf::from(r"C:\")));
+    update(&mut s, Msg::Command(CommandId::Back));
+    let p = pane(&s);
+    update(&mut s, Msg::CloseDiskUsage(p));
+    assert_eq!(s.pane().location(), &Location::Dir(PathBuf::from(r"C:\r")));
+    // L'analyse reste disponible pour y revenir.
+    assert_eq!(s.disk_scans.len(), 1);
+}
+
+#[test]
+fn analyze_space_command_targets_the_selected_folder() {
+    let mut s = state();
+    open(&mut s, r"C:\x", &[("dossier", true), ("f.txt", false)]);
+    let p = pane(&s);
+    update(
+        &mut s,
+        Msg::SelectPositions {
+            pane: p,
+            positions: vec![0],
+            extend: false,
+        },
+    );
+    let fx = update(&mut s, Msg::Command(CommandId::AnalyzeSpace));
+    assert!(
+        fx.iter().any(
+            |e| matches!(e, Effect::ScanDisk { root, .. } if root == Path::new(r"C:\x\dossier"))
+        )
+    );
+}
+
+#[test]
+fn cleanup_asks_then_deletes_and_refreshes_the_analysis() {
+    use fx_fs::cleanup::{CleanKind, CleanMode, Suggestion};
+    let mut s = state();
+    let sugg = Suggestion {
+        kind: CleanKind::NodeModules,
+        title: "Dépendances",
+        detail: "",
+        paths: vec![PathBuf::from(r"C:\r\a")],
+        bytes: 5000,
+        mode: CleanMode::Items,
+        permanent: true,
+    };
+    analyzed(&mut s, vec![sugg]);
+    let root = PathBuf::from(r"C:\r");
+    assert!(
+        update(
+            &mut s,
+            Msg::DiskClean {
+                root: root.clone(),
+                index: 0
+            }
+        )
+        .is_empty()
+    );
+    assert!(
+        matches!(&s.dialog, Some(Dialog::ConfirmClean { items, permanent: true, .. }) if items == &[PathBuf::from(r"C:\r\a")])
+    );
+    let fx = update(&mut s, Msg::ConfirmDialog);
+    assert!(
+        matches!(job(&fx), Job::File(FileOp::Delete { items, permanent: true }) if items == &[PathBuf::from(r"C:\r\a")])
+    );
+    let op = op_id(&fx);
+    // Fin de la suppression : le dossier parent est relu dans l'analyse.
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    let (scan, known) = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::RefreshDisk {
+                scan, dir, known, ..
+            } if dir == &root => Some((*scan, known.clone())),
+            _ => None,
+        })
+        .expect("actualisation");
+    assert_eq!(known, vec![b"a".to_vec()]);
+    let refreshed = fx_fs::diskscan::Refreshed {
+        listing: disk_listing(&[], &[("f.bin", 1000)]),
+        fresh: Vec::new(),
+    };
+    let fx = update(
+        &mut s,
+        Msg::DiskRefreshed {
+            scan,
+            dir: root.clone(),
+            result: Some(Box::new(refreshed)),
+        },
+    );
+    // Liste relue, arbre et suggestions à jour.
+    enum_gen(&fx);
+    let d = &s.disk_scans[0];
+    let tree = d.tree.as_ref().expect("arbre");
+    assert_eq!(tree.size(0), 1000);
+    assert!(tree.find(Path::new(r"C:\r\a")).is_none());
+    assert!(d.suggestions.is_empty());
+}
+
+#[test]
+fn cleaning_folder_contents_lists_them_first() {
+    use fx_fs::cleanup::{CleanKind, CleanMode, Suggestion};
+    let mut s = state();
+    let sugg = Suggestion {
+        kind: CleanKind::Temp,
+        title: "Fichiers temporaires",
+        detail: "",
+        paths: vec![PathBuf::from(r"C:\r\a")],
+        bytes: 5000,
+        mode: CleanMode::Contents,
+        permanent: true,
+    };
+    analyzed(&mut s, vec![sugg]);
+    let fx = update(
+        &mut s,
+        Msg::DiskClean {
+            root: PathBuf::from(r"C:\r"),
+            index: 0,
+        },
+    );
+    assert!(
+        matches!(&fx[..], [Effect::ListContents { dirs, permanent: true, .. }] if dirs == &[PathBuf::from(r"C:\r\a")])
+    );
+    update(
+        &mut s,
+        Msg::CleanListed {
+            title: "Fichiers temporaires",
+            items: Vec::new(),
+            bytes: 0,
+            permanent: true,
+        },
+    );
+    assert!(s.dialog.is_none(), "rien à supprimer : pas de confirmation");
+    update(
+        &mut s,
+        Msg::CleanListed {
+            title: "Fichiers temporaires",
+            items: vec![PathBuf::from(r"C:\r\a\gros.iso")],
+            bytes: 5000,
+            permanent: true,
+        },
+    );
+    assert!(matches!(
+        &s.dialog,
+        Some(Dialog::ConfirmClean { bytes: 5000, .. })
+    ));
+}
+
+#[test]
+fn analyzing_several_drives_opens_one_tab_each() {
+    let mut s = state();
+    update(&mut s, Msg::Command(CommandId::AnalyzeDrives));
+    assert!(s.show_disk_picker);
+    // Exclusif des autres fenêtres flottantes.
+    update(&mut s, Msg::Command(CommandId::CommandPalette));
+    assert!(!s.show_disk_picker && s.show_palette);
+    update(&mut s, Msg::Command(CommandId::AnalyzeDrives));
+    assert!(s.show_disk_picker && !s.show_palette);
+
+    let fx = update(
+        &mut s,
+        Msg::AnalyzeDrives(vec![PathBuf::from(r"C:\"), PathBuf::from(r"D:\")]),
+    );
+    assert!(!s.show_disk_picker);
+    let roots: Vec<&Path> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ScanDisk { root, .. } => Some(root.as_path()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(roots, vec![Path::new(r"C:\"), Path::new(r"D:\")]);
+    assert_eq!(s.tabs.len(), 2);
+    // L'onglet courant (premier lecteur) reste affiché.
+    assert_eq!(s.active_tab, 0);
+    assert!(
+        matches!(s.pane().location(), Location::DiskUsage { root, .. } if root == Path::new(r"C:\"))
+    );
+    assert!(matches!(
+        s.tabs[1].active_pane().location(),
+        Location::DiskUsage { root, .. } if root == Path::new(r"D:\")
+    ));
+    assert_eq!(s.disk_scans.len(), 2);
+}
+
+#[test]
+fn drive_space_is_reloaded_during_and_after_operations() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[("gros.iso", false)]);
+    let p = pane(&s);
+    update(
+        &mut s,
+        Msg::SelectPositions {
+            pane: p,
+            positions: vec![0],
+            extend: false,
+        },
+    );
+    update(&mut s, Msg::Command(CommandId::DeletePermanently));
+    let fx = update(&mut s, Msg::ConfirmDialog);
+    let op = op_id(&fx);
+    let loads = |fx: &[Effect]| {
+        fx.iter()
+            .filter(|e| matches!(e, Effect::LoadDrives))
+            .count()
+    };
+    let progress = |s: &mut AppState, done| {
+        update(
+            s,
+            Msg::OpEvent {
+                op,
+                event: OpEvent::Progress { done, total: 10 },
+            },
+        )
+    };
+    // Pendant l'opération : une relecture, puis plus rien avant une seconde.
+    assert_eq!(loads(&progress(&mut s, 1)), 1);
+    assert_eq!(loads(&progress(&mut s, 2)), 0);
+    // À la fin : toujours.
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    assert_eq!(loads(&fx), 1);
+    // Corbeille vidée : la place revient aux lecteurs.
+    assert_eq!(loads(&update(&mut s, Msg::RecycleBinChanged)), 1);
+}
+
+#[test]
+fn select_all_works_in_the_disk_analysis() {
+    let mut s = state();
+    analyzed(&mut s, Vec::new());
+    assert!(CommandId::SelectAll.is_enabled(&s.command_context()));
+    update(&mut s, Msg::Command(CommandId::SelectAll));
+    assert_eq!(s.pane().selection.count(), 2);
+    assert_eq!(s.pane().selected_paths().len(), 2);
+    update(&mut s, Msg::Command(CommandId::InvertSelection));
+    assert_eq!(s.pane().selection.count(), 0);
+}

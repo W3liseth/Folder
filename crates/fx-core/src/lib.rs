@@ -4,6 +4,7 @@
 //! (40 octets par entrée + nom dans une arène), sans objet alloué par fichier.
 
 pub mod cancel;
+pub mod disktree;
 pub mod entry;
 pub mod format;
 pub mod names;
@@ -13,6 +14,7 @@ pub mod sort;
 pub mod wtf8;
 
 pub use cancel::CancelToken;
+pub use disktree::{DirListing, DiskTree, NodeKind};
 pub use entry::{Batch, EntryFlags, EntryMeta, ExtId};
 pub use names::{NameArena, NameSpan};
 pub use selection::Selection;

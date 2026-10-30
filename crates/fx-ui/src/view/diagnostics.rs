@@ -81,6 +81,25 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                     ),
                 );
                 kv(
+                    "Analyses de l'espace",
+                    format!(
+                        "{} / {} ({} Ko) ; cartes {} Ko",
+                        f.state.disk_scans.len(),
+                        fx_app::disk::MAX_SCANS,
+                        f.state
+                            .disk_scans
+                            .iter()
+                            .map(fx_app::disk::DiskScan::heap_bytes)
+                            .sum::<usize>()
+                            / 1024,
+                        f.vs.treemaps
+                            .values()
+                            .map(super::disk::TreemapCache::heap_bytes)
+                            .sum::<usize>()
+                            / 1024
+                    ),
+                );
+                kv(
                     "Premier lot",
                     pane.first_batch_after.map_or("—".into(), |t| {
                         format!("{:.1} ms", t.as_secs_f64() * 1000.0)

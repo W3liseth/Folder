@@ -64,8 +64,9 @@ pub fn listing_batch(
     state: &mut AppState,
     pane: PaneId,
     generation: u64,
-    batch: Batch,
+    mut batch: Batch,
 ) -> Vec<Effect> {
+    super::disk::patch_batch(state, pane, &mut batch);
     let Some(p) = state.find_pane_mut(pane) else {
         return vec![];
     };
@@ -348,6 +349,15 @@ pub fn op_event(state: &mut AppState, op: u64, event: OpEvent) -> Vec<Effect> {
         OpEvent::Progress { done, total } => {
             o.done = done;
             o.total = total;
+            // Place libre des lecteurs suivie pendant une longue opération (barre latérale,
+            // accueil, analyse de l'espace) : une relecture par seconde au plus.
+            if state
+                .drives_requested
+                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1))
+            {
+                state.drives_requested = Some(Instant::now());
+                fx.push(Effect::LoadDrives);
+            }
         }
         OpEvent::Item(name) => o.current = name,
         OpEvent::Created { created, .. } => o.created.push(created),
@@ -575,7 +585,9 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
     let mut fx = Vec::new();
     if let Some(i) = state.ops.iter().position(|o| o.id == op) {
         let o = state.ops.remove(i);
-        fx.extend(restat_effect(state, o.touched()));
+        let touched = o.touched();
+        fx.extend(super::disk::after_op(state, &touched));
+        fx.extend(restat_effect(state, touched));
         let ended = state.op_history.next_end(fx_win::time::now_filetime());
         let record = OpRecord::of(&o, ended);
         fx.push(Effect::Persist(Persist::AddOp(record.entry())));
@@ -584,9 +596,12 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
             state.op_history.mark_seen();
         }
     }
-    // Toute opération peut avoir changé la corbeille (mise à la corbeille, restauration…).
+    // Toute opération peut avoir changé la corbeille (mise à la corbeille, restauration…)
+    // et la place libre des lecteurs.
     fx.extend(reload_recycle_bins(state));
     fx.push(Effect::CheckClipboard);
+    state.drives_requested = Some(Instant::now());
+    fx.push(Effect::LoadDrives);
     fx
 }
 

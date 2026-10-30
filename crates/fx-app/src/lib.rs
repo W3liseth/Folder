@@ -5,6 +5,7 @@
 //! renvoie des [`Effect`], que le [`Scheduler`] exécute hors du thread UI ; les résultats
 //! reviennent sous forme de `Msg`.
 
+pub mod disk;
 pub mod effect;
 pub mod git;
 pub mod history;

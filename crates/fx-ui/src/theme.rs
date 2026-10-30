@@ -67,6 +67,9 @@ pub mod glyph {
     pub const STAR: &str = "\u{E734}";
     pub const SUCCESS: &str = "\u{E930}";
     pub const WARNING: &str = "\u{E7BA}";
+    /// Analyse de l'espace (secteur de camembert).
+    pub const PIE: &str = "\u{EB05}";
+    pub const BROOM: &str = "\u{EA99}";
     pub const CANCEL: &str = "\u{E711}";
     pub const OPEN: &str = "\u{E8E5}";
     pub const TERMINAL: &str = "\u{E756}";

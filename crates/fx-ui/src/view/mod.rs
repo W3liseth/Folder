@@ -8,6 +8,8 @@
 mod columns;
 mod diagnostics;
 mod dialogs;
+mod disk;
+mod diskpicker;
 mod dnd;
 mod gitmenu;
 mod grid;
@@ -137,6 +139,14 @@ pub struct ViewState {
     pub(crate) sidebar_last: Option<egui::Rect>,
     /// Ctrl + molette accumulée (pavés tactiles : petits pas en points).
     pub(crate) wheel_zoom: f32,
+    /// Analyse de l'espace : carte calculée par volet (quelques volets au plus).
+    pub(crate) treemaps: HashMap<PaneId, disk::TreemapCache>,
+    /// Part de la hauteur donnée à la carte (séparateur déplacé) ; 0 : par défaut.
+    pub(crate) disk_split: f32,
+    /// Menu « Analyser des lecteurs » : bouton (ancre), lecteurs cochés, choix initial fait.
+    pub(crate) disk_anchor: Option<egui::Rect>,
+    pub(crate) disk_pick: Vec<std::path::PathBuf>,
+    pub(crate) disk_pick_init: bool,
 }
 
 impl ViewState {
@@ -182,6 +192,11 @@ impl ViewState {
             sidebar_active: None,
             sidebar_last: None,
             wheel_zoom: 0.0,
+            treemaps: HashMap::new(),
+            disk_split: 0.0,
+            disk_anchor: None,
+            disk_pick: Vec::new(),
+            disk_pick_init: false,
         }
     }
 
@@ -319,6 +334,7 @@ pub fn draw(
         .show(ui, |ui| pane::draw_tab(ui, &mut f));
 
     statuscenter::draw(&ctx, &mut f);
+    diskpicker::draw(&ctx, &mut f);
     gitmenu::draw(&ctx, &mut f);
     toasts::draw(&ctx, &mut f);
     dialogs::draw(&ctx, &mut f);
@@ -407,6 +423,7 @@ fn keyboard(ctx: &egui::Context, f: &mut Fx<'_>) {
     let overlays = f.state.dialog.is_some()
         || f.state.show_palette
         || f.state.show_search
+        || f.state.show_disk_picker
         || f.state.git_menu.is_some();
     for hk in crate::keys::pressed(ctx) {
         if typing && crate::keys::conflicts_with_typing(&hk) {
@@ -416,6 +433,7 @@ fn keyboard(ctx: &egui::Context, f: &mut Fx<'_>) {
             if f.state.show_palette
                 || f.state.show_search
                 || f.state.show_status_center
+                || f.state.show_disk_picker
                 || f.state.git_menu.is_some()
             {
                 f.send(Msg::CloseOverlays);

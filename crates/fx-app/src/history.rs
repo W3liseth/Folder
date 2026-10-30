@@ -29,6 +29,11 @@ pub enum Location {
     RecycleBin,
     /// Réseau : ordinateurs (`None`) ou partages d'un ordinateur (`Some(r"\\SERVEUR")`).
     Network(Option<String>),
+    /// Analyse de l'espace de `root`, ouverte sur son dossier `dir`.
+    DiskUsage {
+        root: PathBuf,
+        dir: PathBuf,
+    },
 }
 
 impl Location {
@@ -37,6 +42,7 @@ impl Location {
         match self {
             Self::Dir(p) => Some(p),
             Self::Search { root, .. } => Some(root),
+            Self::DiskUsage { dir, .. } => Some(dir),
             Self::Home | Self::Tag(_) | Self::RecycleBin | Self::Network(_) => None,
         }
     }
@@ -73,7 +79,7 @@ impl Location {
             Self::RecycleBin => Some(PathBuf::from(RECYCLE_BIN_ID)),
             Self::Network(None) => Some(PathBuf::from(NETWORK_ID)),
             Self::Network(Some(s)) => Some(PathBuf::from(s)),
-            Self::Home | Self::Search { .. } | Self::Tag(_) => None,
+            Self::Home | Self::Search { .. } | Self::Tag(_) | Self::DiskUsage { .. } => None,
         }
     }
 
@@ -82,6 +88,7 @@ impl Location {
     pub fn window_arg(&self) -> PathBuf {
         match self {
             Self::Search { root, .. } => root.clone(),
+            Self::DiskUsage { dir, .. } => dir.clone(),
             _ => self
                 .history_path()
                 .unwrap_or_else(|| PathBuf::from(HOME_ID)),
@@ -117,6 +124,12 @@ impl Location {
             Self::RecycleBin => "Corbeille".into(),
             Self::Network(None) => "Réseau".into(),
             Self::Network(Some(s)) => s.trim_start_matches('\\').to_owned(),
+            Self::DiskUsage { dir, .. } => format!(
+                "Espace · {}",
+                dir.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| dir.display().to_string())
+            ),
         }
     }
 }
@@ -195,7 +208,7 @@ impl History {
     }
 
     /// Historique à sauvegarder (Précédent, Suivant) : les 30 entrées les plus proches de
-    /// chaque côté ; recherches et étiquettes, non restaurables, sont omises.
+    /// chaque côté ; recherches, étiquettes et analyses, non restaurables, sont omises.
     pub fn saved(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
         let keep = |stack: &[Location]| {
             let mut v: Vec<PathBuf> = stack

@@ -158,7 +158,12 @@ pub fn delete_items(state: &mut AppState, items: Vec<PathBuf>, permanent: bool) 
 
 pub fn confirm_dialog(state: &mut AppState) -> Vec<Effect> {
     match state.dialog.take() {
-        Some(Dialog::ConfirmDelete { items, permanent }) => {
+        Some(
+            Dialog::ConfirmDelete { items, permanent }
+            | Dialog::ConfirmClean {
+                items, permanent, ..
+            },
+        ) => {
             vec![start_job(
                 state,
                 Job::File(FileOp::Delete { items, permanent }),

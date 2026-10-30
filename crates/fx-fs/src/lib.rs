@@ -1,8 +1,10 @@
 //! Accès au système de fichiers local : énumération en flux, surveillance des changements,
-//! recherche récursive. Les opérations (`IFileOperation`) sont exposées par `fx_win::fileop`
-//! et orchestrées par `fx-app`.
+//! recherche récursive, analyse de l'espace. Les opérations (`IFileOperation`) sont exposées
+//! par `fx_win::fileop` et orchestrées par `fx-app`.
 
 pub mod archive;
+pub mod cleanup;
+pub mod diskscan;
 pub mod enumerate;
 pub mod measure;
 pub mod recycle;

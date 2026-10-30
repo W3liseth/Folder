@@ -49,6 +49,10 @@ impl NameArena {
         self.bytes.len()
     }
 
+    pub fn shrink_to_fit(&mut self) {
+        self.bytes.shrink_to_fit();
+    }
+
     pub fn capacity(&self) -> usize {
         self.bytes.capacity()
     }

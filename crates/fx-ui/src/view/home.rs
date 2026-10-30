@@ -214,6 +214,10 @@ fn drives(ui: &mut Ui, f: &mut Fx<'_>, width: f32) {
                         f.send(Msg::OpenInNewTab(Location::Dir(d.root.clone())));
                         ui.close();
                     }
+                    if ui.button("Analyser l'espace").clicked() {
+                        f.send(Msg::AnalyzeSpace(d.root.clone()));
+                        ui.close();
+                    }
                     if ui.button("Propriétés").clicked() {
                         f.send(Msg::Properties(d.root.clone()));
                         ui.close();

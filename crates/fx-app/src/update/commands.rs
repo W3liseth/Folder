@@ -37,7 +37,8 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
         Up => {
             let target = match state.pane().location() {
                 Location::Search { root, .. } => Some(Location::Dir(root.clone())),
-                Location::Dir(d) => Some(
+                // Analyse : le parent reste dans l'analyse s'il est sous sa racine.
+                Location::Dir(d) | Location::DiskUsage { dir: d, .. } => Some(
                     d.parent()
                         .map_or(Location::Home, |p| Location::from_path(p.to_path_buf())),
                 ),
@@ -65,6 +66,7 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.show_palette = false;
             state.git_menu = None;
             state.show_status_center = false;
+            state.show_disk_picker = false;
             vec![]
         }
         CommandPalette => {
@@ -72,6 +74,7 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.show_search = false;
             state.git_menu = None;
             state.show_status_center = false;
+            state.show_disk_picker = false;
             vec![]
         }
         StatusCenter => {
@@ -79,6 +82,7 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.show_search = false;
             state.show_palette = false;
             state.git_menu = None;
+            state.show_disk_picker = false;
             if state.show_status_center {
                 state.op_history.mark_seen();
                 // Les autres fenêtres ont pu compléter ou effacer l'historique.
@@ -99,6 +103,7 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.show_palette = false;
             state.show_search = false;
             state.show_status_center = false;
+            state.show_disk_picker = false;
             state.git_menu = Some(crate::state::GitMenu {
                 pane,
                 dir: dir.clone(),
@@ -348,6 +353,36 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
         EmptyRecycleBin => {
             state.dialog = Some(Dialog::ConfirmEmptyRecycleBin);
             vec![]
+        }
+        // Choix des lecteurs (bouton à côté de la palette) : exclusif des autres fenêtres
+        // flottantes.
+        AnalyzeDrives => {
+            state.show_disk_picker = !state.show_disk_picker;
+            state.show_search = false;
+            state.show_palette = false;
+            state.show_status_center = false;
+            state.git_menu = None;
+            if state.show_disk_picker {
+                // Espace libre à jour dans la liste.
+                vec![Effect::LoadDrives]
+            } else {
+                vec![]
+            }
+        }
+        // Dossier sélectionné, sinon dossier affiché, sinon lecteur système.
+        AnalyzeSpace => {
+            let p = state.pane();
+            let target = p
+                .selected_dir()
+                .or_else(|| p.location().dir().map(Path::to_path_buf))
+                .or_else(|| {
+                    let sys = std::env::var_os("SystemDrive").map(|mut d| {
+                        d.push("\\");
+                        PathBuf::from(d)
+                    });
+                    sys.or_else(|| state.drives.first().map(|d| d.root.clone()))
+                });
+            target.map_or_else(Vec::new, |t| super::disk::analyze(state, t))
         }
         Undo => match state.undo.pop_undo() {
             Some(e) => {

@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 fx-ui.workspace = true
 fx-app.workspace = true
+fx-commands.workspace = true
 fx-store.workspace = true
 fx-fs.workspace = true
 fx-win.workspace = true
