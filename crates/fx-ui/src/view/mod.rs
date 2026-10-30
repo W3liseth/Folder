@@ -142,6 +142,8 @@ pub struct ViewState {
     pub(crate) sidebar_last: Option<egui::Rect>,
     /// Ctrl + molette accumulée (pavés tactiles : petits pas en points).
     pub(crate) wheel_zoom: f32,
+    /// Molette : accélération selon la cadence des crans, glissé continu.
+    pub(crate) wheel: crate::wheel::WheelGlide,
     /// Analyse de l'espace : carte calculée par volet (quelques volets au plus).
     pub(crate) treemaps: HashMap<PaneId, disk::TreemapCache>,
     /// Part de la hauteur donnée à la carte (séparateur déplacé) ; 0 : par défaut.
@@ -196,6 +198,7 @@ impl ViewState {
             sidebar_active: None,
             sidebar_last: None,
             wheel_zoom: 0.0,
+            wheel: crate::wheel::WheelGlide::default(),
             treemaps: HashMap::new(),
             disk_split: 0.0,
             disk_anchor: None,
@@ -286,7 +289,7 @@ pub fn draw(
         theme::set_accent(&ctx, accent);
     }
     theme::apply(&ctx, state.settings.theme, vs.accent);
-    theme::apply_scroll_speed(&ctx, state.settings.scroll_lines);
+    vs.wheel.frame(&ctx);
     let pal = Palette::new(ctx.theme() == Theme::Dark, vs.accent);
     images.pump(&ctx);
     vs.fallbacks.apply(&ctx);

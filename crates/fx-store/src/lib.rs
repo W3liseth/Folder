@@ -170,9 +170,10 @@ mod tests {
         let dir = tmp("settings");
         let paths = Paths::in_dir(&dir);
         assert_eq!(load_settings(&paths), Settings::default());
-        // Réglage absent d'un ancien fichier : valeur par défaut.
-        let old: Settings = toml::from_str("show_hidden = true").expect("toml");
-        assert!(old.show_hidden && (old.scroll_lines - 3.0).abs() < f32::EPSILON);
+        // Réglage absent d'un ancien fichier : valeur par défaut ; réglage retiré depuis
+        // (vitesse de défilement) : ignoré.
+        let old: Settings = toml::from_str("show_hidden = true\nscroll_lines = 5.0").expect("toml");
+        assert!(old.show_hidden && (old.drive_bar - 3.0).abs() < f32::EPSILON);
         let mut s = Settings {
             show_hidden: true,
             grid_size: 128,

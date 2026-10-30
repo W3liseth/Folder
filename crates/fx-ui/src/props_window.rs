@@ -111,6 +111,7 @@ struct PropsApp {
     shown: bool,
     hwnd: Option<isize>,
     status: Option<String>,
+    wheel: crate::wheel::WheelGlide,
 }
 
 /// Ouvre la fenêtre Propriétés et rend la main à sa fermeture.
@@ -170,6 +171,7 @@ impl PropsApp {
             shown: false,
             hwnd: None,
             status: None,
+            wheel: crate::wheel::WheelGlide::default(),
         }
     }
 
@@ -308,6 +310,7 @@ impl egui_software_backend::App for PropsApp {
     fn ui(&mut self, ui: &mut Ui, _backend: &mut egui_software_backend::SoftwareBackend) {
         let ctx = ui.ctx().clone();
         let pal = self.pal;
+        self.wheel.frame(&ctx);
         if self.icon.is_none()
             && let Some(img) = self.data.lock().expect("données").icon.take()
         {

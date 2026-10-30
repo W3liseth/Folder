@@ -163,7 +163,7 @@ impl SettingsApp {
             msgs: Vec::new(),
             threads: 0,
         };
-        theme::apply_scroll_speed(&ctx, self.state.settings.scroll_lines);
+        f.vs.wheel.frame(&ctx);
         crate::view::settings::page(ui, &mut f);
         let msgs = std::mem::take(&mut f.msgs);
         for m in msgs {

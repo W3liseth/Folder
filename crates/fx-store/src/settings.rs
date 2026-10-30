@@ -47,8 +47,6 @@ pub struct Settings {
     pub accent: Option<[u8; 3]>,
     /// Épaisseur des barres d'espace disque de la barre latérale (points).
     pub drive_bar: f32,
-    /// Lignes parcourues par cran de molette (3, comme le réglage par défaut de Windows).
-    pub scroll_lines: f32,
     pub folders_first: bool,
     pub confirm_delete: bool,
     pub show_thumbnails: bool,
@@ -91,7 +89,6 @@ impl Default for Settings {
             show_tags: true,
             accent: None,
             drive_bar: 3.0,
-            scroll_lines: 3.0,
             folders_first: true,
             confirm_delete: true,
             show_thumbnails: true,

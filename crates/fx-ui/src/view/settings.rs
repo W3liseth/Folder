@@ -205,16 +205,6 @@ fn general(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
         "Ouvre fichiers et dossiers d'un clic, comme un lien.",
         |ui| toggle(ui, &mut s.single_click),
     );
-    let pal = f.pal;
-    setting(
-        ui,
-        f,
-        "Vitesse de défilement",
-        "Lignes parcourues par cran de molette (3 par défaut, comme Windows).",
-        |ui| {
-            widgets::slider(ui, &pal, &mut s.scroll_lines, 1.0..=10.0, 1.0, " lignes");
-        },
-    );
 }
 
 fn appearance(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {

@@ -14,6 +14,7 @@ mod keys;
 pub mod offscreen;
 pub mod theme;
 mod view;
+mod wheel;
 mod widgets;
 
 use std::path::PathBuf;

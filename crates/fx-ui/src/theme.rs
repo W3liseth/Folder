@@ -242,18 +242,6 @@ pub fn set_accent(ctx: &egui::Context, accent: Color32) {
     }
 }
 
-/// Hauteur d'une « ligne » de défilement : celle d'une ligne de la vue Détails.
-const SCROLL_LINE: f32 = 30.0;
-
-/// Vitesse de la molette : `lines` lignes par cran (winit transmet un cran comme une ligne ;
-/// egui en fait 40 points par défaut, soit à peine plus d'une ligne de la liste).
-pub fn apply_scroll_speed(ctx: &egui::Context, lines: f32) {
-    let speed = lines.clamp(1.0, 10.0) * SCROLL_LINE;
-    if ctx.options(|o| o.input_options.line_scroll_speed) != speed {
-        ctx.options_mut(|o| o.input_options.line_scroll_speed = speed);
-    }
-}
-
 /// Couleurs d'accentuation proposées (celles de Windows).
 pub const ACCENTS: [[u8; 3]; 12] = [
     [0, 120, 212],

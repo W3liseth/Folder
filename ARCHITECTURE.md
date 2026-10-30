@@ -1032,9 +1032,19 @@ télémétrie distante.
   jour » dans la barre de titre, installation silencieuse puis relance avec la session ;
   Paramètres › Mises à jour (état, recherche, réglage) et notes de version
   (`CHANGELOG.md` embarqué).
-- **Souris** : boutons 4 et 5 pour précédent et suivant ; molette à N lignes de liste
-  (30 px) par cran, réglable de 1 à 10 dans Paramètres > Général (3 par défaut, comme
-  Windows ; egui n'en ferait que 40 px).
+- **Souris** : boutons 4 et 5 pour précédent et suivant. Molette sans réglage de vitesse
+  (`fx-ui::wheel`, toutes les fenêtres) : la distance d'un cran suit la cadence récente des
+  crans (moyenne à décroissance exponentielle, 100 ms) — 60 points (2 lignes de liste) en
+  dessous de ~6 crans/s, puis progressivement plus, jusqu'à ×7 (~95 points à 10 crans/s,
+  ~190 à 20, ~280 à 30). Le contenu rejoint sa cible par un ressort à amortissement
+  critique (90 % en ~0,13 s, arrêt ~0,25 s après le dernier cran) : la vitesse reste
+  continue d'un cran à l'autre, sans à-coup ni dépassement ; un changement de sens arrête
+  net. Le résultat remplace `smooth_scroll_delta` d'egui en début d'image. Fractions de cran
+  (molette libre, pavé tactile) : pas d'accélération ; Ctrl + molette : zoom, inchangé.
+  Barres de défilement flottantes : visibles pendant le défilement (molette, flèches,
+  Page préc./suiv., Début/Fin), effacées en 150 ms au bout de 2 s sans défilement, même
+  pointeur au-dessus de la liste (opacités `active_*` d'egui pilotées par `fx-ui::wheel`) ;
+  survolées ou saisies, elles réapparaissent.
 - **Étiquettes** : icône d'étiquette colorée (barre latérale, accueil, menu contextuel),
   activables dans les paramètres, ajout, suppression, couleurs proposées ou libres.
 - **Shell** : menu contextuel folder + « Afficher plus d'options », icônes et miniatures via
