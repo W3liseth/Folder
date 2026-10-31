@@ -949,7 +949,9 @@ télémétrie distante.
   peut aussi être un chemin relatif au dossier affiché ou une commande — `cmd`, `code .` —
   résolue par `fx_app::address` sur le thread shell (`Effect::RunAddress` : dossier courant
   puis `PATH` × `PATHEXT`, sinon ShellExecute pour App Paths, URL et protocoles) et lancée
-  avec le dossier affiché comme dossier de travail ; un chemin absolu sans espace reste
+  avec le dossier affiché comme dossier de travail ; un script `.cmd`/`.bat` trouvé dans le
+  `PATH` — lanceur comme `code.cmd` — passe par `cmd /c` sans console (`CREATE_NO_WINDOW`) ;
+  un chemin absolu sans espace reste
   ouvert directement par `update`), page d'accueil (accès rapide,
   lecteurs avec jauge, étiquettes, fichiers récents), barre latérale (accueil, accès rapide
   avec la corbeille, lecteurs, réseau, distributions WSL lues dans le registre, étiquettes ;

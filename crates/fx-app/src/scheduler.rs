@@ -337,7 +337,20 @@ impl Scheduler {
                             )));
                         }
                     }
-                    address::Target::Run { program, args } => {
+                    address::Target::Run {
+                        program,
+                        args,
+                        quiet: true,
+                    } => {
+                        let script = Path::new(&program);
+                        if let Err(e) = address::run_quiet(script, &args, env.cwd.as_deref()) {
+                            out.send(Msg::Error(format!(
+                                "Impossible de lancer « {} » : {e}",
+                                display(script)
+                            )));
+                        }
+                    }
+                    address::Target::Run { program, args, .. } => {
                         if let Err(e) = fx_win::shell::run(&program, &args, env.cwd.as_deref()) {
                             let name = program.to_string_lossy();
                             out.send(Msg::Error(if e.is_not_found() {

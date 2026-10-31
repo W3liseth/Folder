@@ -5,6 +5,16 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.10.1 — 2026-10-31
+
+- Barre d'adresse : `code` et `code .` ouvrent VS Code sans terminal. Les lanceurs
+  installés comme scripts dans le PATH (`code.cmd`, `cursor.cmd`…) démarrent sans fenêtre
+  de console ; un script du dossier affiché garde la sienne, comme au double-clic.
+- Fenêtre Paramètres : même fond Acrylic que la fenêtre principale, barre de titre
+  comprise.
+- Textes corrigés : espaces en trop au milieu de descriptions des Paramètres (couleur
+  d'accentuation, effet de transparence) et d'une notification de la barre latérale.
+
 ## 0.10.0 — 2026-10-31
 
 - Nouvelle icône : une pile de dossiers colorés (vert, rouge, jaune et bleu vitré), dans la

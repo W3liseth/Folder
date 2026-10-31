@@ -74,7 +74,30 @@ pub enum Target {
     File(PathBuf),
     /// Programme à lancer (chemin trouvé, ou nom laissé au shell : App Paths, URL, protocole
     /// `ms-settings:`…) avec ses arguments, dans le dossier courant.
-    Run { program: OsString, args: String },
+    Run {
+        program: OsString,
+        args: String,
+        /// Script `.cmd`/`.bat` trouvé dans le `PATH` : lanceur d'application (`code.cmd` de
+        /// VS Code, `cursor.cmd`…) exécuté sans fenêtre de console (cf. [`run_quiet`]).
+        quiet: bool,
+    },
+}
+
+/// Programme trouvé sur le disque.
+struct Found {
+    path: PathBuf,
+    /// Script trouvé dans un dossier du `PATH` (ni le dossier courant, ni un chemin saisi).
+    quiet: bool,
+}
+
+impl Found {
+    fn run(self, args: &str) -> Target {
+        Target::Run {
+            program: self.path.into(),
+            args: args.to_owned(),
+            quiet: self.quiet,
+        }
+    }
 }
 
 /// Au-delà, on ne cherche plus de programme parmi les débuts de saisie (chemin non cité avec
@@ -96,10 +119,14 @@ pub fn resolve(text: &str, env: &Env, fs: &impl Probe) -> Target {
         {
             return target;
         }
-        return Target::Run {
-            program: find_program(program, env, fs).map_or_else(|| program.into(), Into::into),
-            args: args.to_owned(),
-        };
+        return find_program(program, env, fs).map_or_else(
+            || Target::Run {
+                program: program.into(),
+                args: args.to_owned(),
+                quiet: false,
+            },
+            |found| found.run(args),
+        );
     }
     if let Some(target) = existing(t, env, fs) {
         return target;
@@ -117,17 +144,15 @@ pub fn resolve(text: &str, env: &Env, fs: &impl Probe) -> Target {
         if n >= MAX_PREFIXES || (n > 0 && !is_path_like(head)) {
             break;
         }
-        if let Some(program) = find_program(head, env, fs) {
-            return Target::Run {
-                program: program.into(),
-                args: t[cut..].trim_start().to_owned(),
-            };
+        if let Some(found) = find_program(head, env, fs) {
+            return found.run(t[cut..].trim_start());
         }
     }
     let (program, args) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
     Target::Run {
         program: program.into(),
         args: args.trim_start().to_owned(),
+        quiet: false,
     }
 }
 
@@ -179,7 +204,7 @@ fn is_path_like(s: &str) -> bool {
 /// Programme désigné par `name` : chemin (relatif au dossier courant) ou nom cherché dans le
 /// dossier courant puis le `PATH`, comme l'invite de commandes. Sans extension, on essaie
 /// celles de `PATHEXT` : `code` trouve `code.cmd`, pas le script sans extension voisin.
-fn find_program(name: &str, env: &Env, fs: &impl Probe) -> Option<PathBuf> {
+fn find_program(name: &str, env: &Env, fs: &impl Probe) -> Option<Found> {
     if name.is_empty() || name.ends_with(['\\', '/']) {
         return None;
     }
@@ -196,13 +221,52 @@ fn find_program(name: &str, env: &Env, fs: &impl Probe) -> Option<PathBuf> {
     let is_file = |p: &PathBuf| fs.kind(p) == Some(Kind::File);
     if is_path_like(name) {
         let base = absolute(Path::new(name), env)?;
-        return candidates(normalize(&base)).find(is_file);
+        let path = candidates(normalize(&base)).find(is_file)?;
+        return Some(Found { path, quiet: false });
     }
-    env.cwd
+    if let Some(path) = env
+        .cwd
         .iter()
-        .chain(&env.path)
         .flat_map(|dir| candidates(dir.join(name)))
         .find(is_file)
+    {
+        return Some(Found { path, quiet: false });
+    }
+    let path = env
+        .path
+        .iter()
+        .flat_map(|dir| candidates(dir.join(name)))
+        .find(is_file)?;
+    let quiet = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
+    Some(Found { path, quiet })
+}
+
+/// Exécute un script lanceur sans fenêtre de console. Lancé par ShellExecute, `code.cmd`
+/// ouvre une console le temps que VS Code démarre ; sans console (`CREATE_NO_WINDOW`), seule
+/// la fenêtre de l'application apparaît. Entrées et sorties nulles : un `pause` ou une
+/// question du script reçoit une fin de fichier au lieu d'attendre une réponse invisible.
+pub fn run_quiet(script: &Path, args: &str, cwd: Option<&Path>) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let comspec =
+        std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+    let mut cmd = Command::new(comspec);
+    // `/s /c ""script" args"` : cmd retire seulement les guillemets extérieurs, les arguments
+    // sont transmis tels que saisis (comme dans une invite de commandes) ; `/d` ignore AutoRun.
+    cmd.raw_arg(format!("/d /s /c \"\"{}\" {args}\"", script.display()))
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    cmd.spawn().map(drop)
 }
 
 #[cfg(test)]
@@ -270,6 +334,15 @@ mod tests {
         Target::Run {
             program: program.into(),
             args: args.into(),
+            quiet: false,
+        }
+    }
+
+    fn quiet(program: &str, args: &str) -> Target {
+        Target::Run {
+            program: program.into(),
+            args: args.into(),
+            quiet: true,
         }
     }
 
@@ -287,9 +360,10 @@ mod tests {
 
     #[test]
     fn pathext_wins_over_extensionless_script() {
+        // Script du PATH : lanceur d'application, sans console.
         assert_eq!(
             resolve("code .", &env(), &disk()),
-            run(
+            quiet(
                 r"C:\Users\moi\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",
                 "."
             )
@@ -298,9 +372,15 @@ mod tests {
 
     #[test]
     fn current_folder_is_searched_first() {
+        // Script du dossier courant ou désigné par son chemin : console visible, comme un
+        // double-clic.
         assert_eq!(
             resolve("build release", &env(), &disk()),
             run(r"D:\projets\app\build.bat", "release")
+        );
+        assert_eq!(
+            resolve(r".\build x", &env(), &disk()),
+            run(r"D:\projets\app\build.bat", "x")
         );
     }
 
@@ -358,7 +438,7 @@ mod tests {
     #[test]
     fn real_path_finds_cmd() {
         let target = resolve("cmd /k ver", &Env::from_process(None), &FsProbe);
-        let Target::Run { program, args } = target else {
+        let Target::Run { program, args, .. } = target else {
             panic!("pas un programme : {target:?}");
         };
         assert!(
@@ -368,6 +448,33 @@ mod tests {
                 .ends_with(r"\cmd.exe")
         );
         assert_eq!(args, "/k ver");
+    }
+
+    #[test]
+    fn quiet_script_gets_its_arguments_and_working_folder() {
+        // Espace dans le chemin, comme « Microsoft VS Code\bin\code.cmd ».
+        let base = std::env::temp_dir().join(format!("fx-quiet {}", std::process::id()));
+        let cwd = base.join("dossier courant");
+        std::fs::create_dir_all(&cwd).expect("dossier");
+        let script = base.join("lanceur.cmd");
+        std::fs::write(
+            &script,
+            "@echo %* > \"%~dp0sortie.txt\"\r\n@cd >> \"%~dp0sortie.txt\"\r\n",
+        )
+        .expect("script");
+        run_quiet(&script, ". --reuse-window", Some(&cwd)).expect("lancement");
+        let out = base.join("sortie.txt");
+        let mut text = String::new();
+        for _ in 0..100 {
+            text = std::fs::read_to_string(&out).unwrap_or_default();
+            if text.lines().count() >= 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        assert_eq!(lines, [". --reuse-window", &*cwd.to_string_lossy()]);
     }
 
     #[test]
