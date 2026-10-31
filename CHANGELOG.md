@@ -5,6 +5,11 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.10.2 — 2026-10-31
+
+- Barre de titre : le bouton « Mettre à jour » est centré verticalement sur les boutons
+  de la fenêtre (il était décalé vers le bas).
+
 ## 0.10.1 — 2026-10-31
 
 - Barre d'adresse : `code` et `code .` ouvrent VS Code sans terminal. Les lanceurs

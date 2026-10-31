@@ -585,10 +585,12 @@ fn update_button(ui: &mut Ui, f: &mut Fx<'_>, full: Rect) -> f32 {
         .size()
         .x;
     let w = 12.0 + 14.0 + 6.0 + text_w + 12.0;
-    let rect = Rect::from_min_size(
+    // Centré comme les glyphes des boutons de la fenêtre voisins (hauts de HEIGHT - 4),
+    // pas comme les onglets, décalés vers le bas.
+    let rect = Rect::from_center_size(
         pos2(
-            full.right() - BUTTON_W * 3.0 - 8.0 - w,
-            full.center().y + 3.0 - 13.0,
+            full.right() - BUTTON_W * 3.0 - 8.0 - w / 2.0,
+            full.top() + (HEIGHT - 4.0) / 2.0,
         ),
         vec2(w, 26.0),
     );
