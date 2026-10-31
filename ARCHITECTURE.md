@@ -1040,8 +1040,8 @@ télémétrie distante.
   n'est pas modifié), la trie comme folder, y sélectionne le fichier, invoque son verbe par
   défaut, puis vit tant que la fenêtre ouverte existe (~24 Mo, 23 threads, hors du processus
   principal). La fenêtre principale ne guette qu'un échec rapide (repli `ShellExecute`).
-- **Icône** : dossier en perspective (feuilles verte, rouge-orangé et jaune, façade bleue
-  vitrée) ; source `app/folder/icon/icone.png` (1254 px), transformée par `make_ico.ps1`
+- **Icône** : pile de dossiers vus de face (verte, rouge et jaune à l'arrière, bleu vitré
+  devant) ; source `app/folder/icon/icone.png` (1254 px), transformée par `make_ico.ps1`
   (System.Drawing, sans dépendance) : pixels parasites du détourage retirés (seule la plus
   grande zone opaque est gardée, avec 3 px d'anticrénelage), recadrage carré, réduction en
   alpha prémultiplié vers `folder.ico` (10 tailles, de 256 à 16 px), `folder-256.png`

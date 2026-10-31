@@ -5,6 +5,18 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.10.0 — 2026-10-31
+
+- Nouvelle icône : une pile de dossiers colorés (vert, rouge, jaune et bleu vitré), dans la
+  barre des tâches, Alt+Tab, l'Explorateur et l'installeur.
+- Barre latérale en arborescence : épingles, lecteurs et distributions WSL se déroulent
+  d'un clic sur leur flèche, comme dans l'Explorateur ; un clic sur le nom ouvre le dossier.
+- Sections de la barre latérale repliables (Accès rapide, Lecteurs, Réseau, WSL,
+  Étiquettes) d'un clic sur leur titre ; l'état est gardé.
+- Barre d'adresse : comme dans l'Explorateur, elle accepte un chemin relatif au dossier
+  affiché (`src`, `..`) ou une commande (`cmd`, `code .`, `notepad notes.txt`), lancée
+  dans le dossier affiché. Les variables d'environnement sont développées partout.
+
 ## 0.9.0 — 2026-10-31
 
 - Fond Acrylic (Windows 11) : l'arrière-plan de la fenêtre devient translucide et flouté,
