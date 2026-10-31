@@ -385,7 +385,7 @@ fn edit_path(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect) {
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO)
             .align(egui::Align2::LEFT_TOP)
-            .hint_text("Saisissez un chemin, ex. C:\\Users")
+            .hint_text("Saisissez un chemin ou une commande, ex. C:\\Users, cmd, code .")
             .desired_width(inner.width())
             .min_size(inner.size()),
     );
@@ -402,14 +402,12 @@ fn edit_path(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect) {
     }
     if resp.lost_focus() {
         if ui.input(|i| i.key_pressed(Key::Enter)) {
-            let t = text.trim().trim_matches('"').to_owned();
-            if !t.is_empty() {
-                let p = if t.len() == 2 && t.ends_with(':') {
-                    PathBuf::from(format!("{t}\\"))
-                } else {
-                    expand(&t)
-                };
-                f.send(Msg::OpenPath(p));
+            let t = text.trim();
+            if t.len() == 2 && t.ends_with(':') {
+                f.send(Msg::OpenPath(PathBuf::from(format!("{t}\\"))));
+            } else if !t.is_empty() {
+                // Chemin ou commande (`cmd`, `code .`) : résolu par fx-app, hors du thread UI.
+                f.send(Msg::OpenAddress(expand(t)));
             }
         }
         return; // fin de l'édition (Entrée, Échap ou clic ailleurs)
@@ -417,8 +415,9 @@ fn edit_path(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect) {
     f.vs.path_edit = Some(text);
 }
 
-/// Variables d'environnement (`%USERPROFILE%`) et `~`.
-fn expand(t: &str) -> PathBuf {
+/// Variables d'environnement (`%USERPROFILE%`), dans toute la saisie comme l'Explorateur
+/// (arguments d'une commande compris), et `~` en tête.
+fn expand(t: &str) -> String {
     let mut s = t.to_owned();
     if let Some(rest) = s.strip_prefix('~')
         && let Some(home) = std::env::var_os("USERPROFILE")
@@ -440,7 +439,7 @@ fn expand(t: &str) -> PathBuf {
             &s[start + 2 + len..]
         );
     }
-    PathBuf::from(s)
+    s
 }
 
 #[cfg(test)]
@@ -461,10 +460,11 @@ mod tests {
     #[test]
     fn expands_env_vars() {
         let home = std::env::var("USERPROFILE").expect("USERPROFILE");
+        assert_eq!(expand("%USERPROFILE%\\x"), format!("{home}\\x"));
+        assert_eq!(expand("~\\y"), format!("{home}\\y"));
         assert_eq!(
-            expand("%USERPROFILE%\\x"),
-            PathBuf::from(format!("{home}\\x"))
+            expand("notepad %USERPROFILE%\\a.txt"),
+            format!("notepad {home}\\a.txt")
         );
-        assert_eq!(expand("~\\y"), PathBuf::from(format!("{home}\\y")));
     }
 }

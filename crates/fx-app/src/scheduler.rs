@@ -11,6 +11,7 @@ use fx_shell::{ImageSink, ShellWorker};
 use fx_store::{Db, Paths};
 use fx_win::fileop::{FileOp, OpEvent};
 
+use crate::address;
 use crate::effect::{Effect, Persist, Target};
 use crate::msg::Msg;
 use crate::ops::Job;
@@ -319,6 +320,35 @@ impl Scheduler {
                         "Terminal indisponible : {}",
                         e.message().trim()
                     )));
+                }
+            }),
+            Effect::RunAddress { pane, text, cwd } => self.shell.spawn(move || {
+                let env = address::Env::from_process(cwd);
+                match address::resolve(&text, &env, &address::FsProbe) {
+                    address::Target::Dir(dir) => {
+                        out.send(Msg::NavigatePane(pane, crate::Location::Dir(dir)));
+                    }
+                    address::Target::File(path) => {
+                        if let Err(e) = fx_win::shell::open(&path) {
+                            out.send(Msg::Error(format!(
+                                "Impossible d'ouvrir « {} » : {}",
+                                display(&path),
+                                e.message().trim()
+                            )));
+                        }
+                    }
+                    address::Target::Run { program, args } => {
+                        if let Err(e) = fx_win::shell::run(&program, &args, env.cwd.as_deref()) {
+                            let name = program.to_string_lossy();
+                            out.send(Msg::Error(if e.is_not_found() {
+                                format!(
+                                    "Windows ne trouve pas « {name} ». Vérifiez le nom, puis réessayez."
+                                )
+                            } else {
+                                format!("Impossible de lancer « {name} » : {}", e.message().trim())
+                            }));
+                        }
+                    }
                 }
             }),
             Effect::Job { op, job, cancel } => {

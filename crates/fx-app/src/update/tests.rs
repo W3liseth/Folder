@@ -233,6 +233,32 @@ fn system_settings_page_opens_through_the_shell() {
 }
 
 #[test]
+fn address_bar_paths_open_at_once_and_commands_run_off_the_ui_thread() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    let p = pane(&s);
+    // Chemin absolu sans espace (même cité) : navigation immédiate, sans aller-retour.
+    let fx = update(&mut s, Msg::OpenAddress(r#""C:\Users""#.into()));
+    enum_gen(&fx);
+    assert_eq!(s.pane().location(), &Location::Dir(r"C:\Users".into()));
+    // Commande : résolue sur le thread shell, avec le dossier affiché comme dossier de travail.
+    let fx = update(&mut s, Msg::OpenAddress("  code .  ".into()));
+    assert!(matches!(
+        &fx[..],
+        [Effect::RunAddress { pane, text, cwd }]
+            if *pane == p && text == "code ." && cwd.as_deref() == Some(Path::new(r"C:\Users"))
+    ));
+    // Chemin avec espaces : peut être un programme suivi d'arguments, résolu de même.
+    let fx = update(&mut s, Msg::OpenAddress(r"C:\Program Files".into()));
+    assert!(matches!(&fx[..], [Effect::RunAddress { .. }]));
+    // Accueil : pas de dossier courant (le thread shell prend le profil utilisateur).
+    update(&mut s, Msg::Navigate(Location::Home));
+    let fx = update(&mut s, Msg::OpenAddress("cmd".into()));
+    assert!(matches!(&fx[..], [Effect::RunAddress { cwd: None, .. }]));
+    assert!(update(&mut s, Msg::OpenAddress("  ".into())).is_empty());
+}
+
+#[test]
 fn activate_dir_navigates_and_file_opens() {
     let mut s = state();
     open(&mut s, r"C:\a", &[("sub", true), ("f.txt", false)]);

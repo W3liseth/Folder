@@ -62,6 +62,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             nav::after_selection(state)
         }
         Msg::OpenPath(path) => nav::open_path(state, path),
+        Msg::OpenAddress(text) => nav::open_address(state, &text),
         Msg::OpenSystemSettings(uri) => vec![Effect::Open(uri.into())],
         Msg::Properties(path) => edit::open_properties(state, vec![path], None),
         Msg::NativeProperties(path) => vec![Effect::Properties(path)],

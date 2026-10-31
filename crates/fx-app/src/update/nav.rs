@@ -412,6 +412,32 @@ pub fn open_path(state: &mut AppState, path: PathBuf) -> Vec<Effect> {
     vec![Effect::Open(path)]
 }
 
+/// Saisie de la barre d'adresse. Un chemin absolu sans espace (le cas courant, collé ou
+/// tapé) est ouvert tout de suite, sans passer par le thread shell ; le reste (chemin
+/// relatif, chemin avec espaces, commande et arguments) y est résolu (`address::resolve`).
+pub fn open_address(state: &mut AppState, text: &str) -> Vec<Effect> {
+    let t = text.trim();
+    // « Copier en tant que chemin » entoure le chemin de guillemets.
+    let t = match t.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+        Some(inner) if !inner.contains('"') => inner,
+        _ => t,
+    };
+    if t.is_empty() {
+        return vec![];
+    }
+    let path = PathBuf::from(t);
+    let special = !matches!(Location::from_path(path.clone()), Location::Dir(_));
+    if special || (path.is_absolute() && !t.contains(char::is_whitespace)) {
+        return open_path(state, path);
+    }
+    let pane = state.pane();
+    vec![Effect::RunAddress {
+        pane: pane.id,
+        text: t.to_owned(),
+        cwd: pane.working_dir().map(Path::to_path_buf),
+    }]
+}
+
 /// Liste et sélection ciblées par un clic en colonne `column` (0 : liste principale).
 fn column_parts(pane: &mut Pane, column: usize) -> Option<(&DirSnapshot, &mut fx_core::Selection)> {
     if column == 0 {

@@ -126,6 +126,13 @@ pub enum Effect {
     },
     RunAsAdmin(PathBuf),
     OpenTerminal(PathBuf),
+    /// Saisie de la barre d'adresse à résoudre hors du thread UI (cf. `address`) : dossier
+    /// (navigation du volet `pane`), fichier à ouvrir ou programme à lancer dans `cwd`.
+    RunAddress {
+        pane: PaneId,
+        text: String,
+        cwd: Option<PathBuf>,
+    },
     Job {
         op: u64,
         job: Job,

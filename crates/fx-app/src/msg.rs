@@ -57,6 +57,9 @@ pub enum Msg {
     FocusPane(PaneId),
     /// Ouvre un fichier avec son application par défaut (ou navigue si c'est un dossier).
     OpenPath(PathBuf),
+    /// Texte validé dans la barre d'adresse (variables d'environnement déjà développées) :
+    /// chemin, absolu ou relatif au dossier courant, ou commande (`cmd`, `code .`).
+    OpenAddress(String),
     /// Page des Paramètres de Windows (`ms-settings:…`, ex. `ms-settings:colors`).
     OpenSystemSettings(&'static str),
     /// Fenêtre Propriétés de folder pour un chemin.

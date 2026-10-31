@@ -1,13 +1,15 @@
 //! Actions shell simples : ouvrir, ouvrir avec, propriétés, terminal, administrateur,
 //! corbeille.
 
+use std::ffi::OsStr;
 use std::path::Path;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Shell::{
     ASSOCF_NONE, ASSOCSTR_FRIENDLYAPPNAME, AssocQueryStringW, OAIF_ALLOW_REGISTRATION, OAIF_EXEC,
-    OPENASINFO, SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW, SHERB_NOCONFIRMATION, SHEmptyRecycleBinW,
-    SHOP_FILEPATH, SHObjectProperties, SHOpenWithDialog, ShellExecuteExW, ShellExecuteW,
+    OPENASINFO, SEE_MASK_FLAG_NO_UI, SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW,
+    SHERB_NOCONFIRMATION, SHEmptyRecycleBinW, SHOP_FILEPATH, SHObjectProperties, SHOpenWithDialog,
+    ShellExecuteExW, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, w};
@@ -61,6 +63,32 @@ pub fn open(path: &Path) -> Result<()> {
     // Pas de forme \\?\ ici : de nombreuses applications ne la comprennent pas.
     let dir = working_dir(path).map(wide);
     execute(None, w!("open"), &wide(path), None, dir.as_deref())
+}
+
+/// Lance `program` avec `args` dans le dossier `dir`, comme la barre d'adresse de
+/// l'Explorateur : chemin complet, ou nom que le shell résout lui-même (App Paths, URL,
+/// protocole). Sans boîte d'erreur du shell : l'appelant affiche la sienne.
+///
+/// Bloquant tant que le shell résout la cible : depuis un thread STA de travail.
+pub fn run(program: &OsStr, args: &str, dir: Option<&Path>) -> Result<()> {
+    let file = wide(Path::new(program));
+    let params = (!args.is_empty()).then(|| wide_str(args));
+    let dir = dir.map(wide);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_FLAG_NO_UI,
+        lpVerb: w!("open"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: params
+            .as_ref()
+            .map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        lpDirectory: dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    // SAFETY: structure initialisée avec sa taille ; chaînes terminées par NUL vivantes
+    // jusqu'à la fin de l'appel.
+    unsafe { ShellExecuteExW(&mut info) }.op("ShellExecuteExW")
 }
 
 /// Ouvre un élément de l'espace de noms du shell désigné par son nom d'analyse

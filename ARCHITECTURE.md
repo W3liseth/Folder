@@ -944,7 +944,12 @@ télémétrie distante.
   fenêtre, et qui s'y fond au relâchement en se fermant sans enregistrer sa session ; suivi maison, `egui::DragAndDrop` imposant le curseur « saisie »,
   flèche multidirectionnelle sous Windows),
   historique par volet,
-  omnibar (fil d'Ariane cliquable, édition du chemin), page d'accueil (accès rapide,
+  omnibar (fil d'Ariane cliquable, édition du chemin ; comme dans l'Explorateur, la saisie
+  peut aussi être un chemin relatif au dossier affiché ou une commande — `cmd`, `code .` —
+  résolue par `fx_app::address` sur le thread shell (`Effect::RunAddress` : dossier courant
+  puis `PATH` × `PATHEXT`, sinon ShellExecute pour App Paths, URL et protocoles) et lancée
+  avec le dossier affiché comme dossier de travail ; un chemin absolu sans espace reste
+  ouvert directement par `update`), page d'accueil (accès rapide,
   lecteurs avec jauge, étiquettes, fichiers récents), barre latérale (accueil, accès rapide
   avec la corbeille, lecteurs, réseau, distributions WSL lues dans le registre, étiquettes ;
   icônes de Windows ; sections repliables, état gardé dans `sidebar_collapsed` ; épingles,
