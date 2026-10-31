@@ -414,6 +414,34 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             state.wsl = w;
             vec![]
         }
+        Msg::ToggleTree {
+            section,
+            root,
+            path,
+        } => {
+            let hidden = state.settings.show_hidden;
+            match state.tree.toggle(section, &root, &path, hidden) {
+                Ok(fx) => fx.into_iter().collect(),
+                Err(crate::tree::TooManyOpen) => {
+                    state.toast(
+                        format!(
+                            "Pas plus de {} dossiers ouverts dans la barre latérale :                              refermez-en quelques-uns.",
+                            crate::tree::MAX_OPEN
+                        ),
+                        ToastKind::Info,
+                    );
+                    vec![]
+                }
+            }
+        }
+        Msg::SubdirsLoaded { generation, result } => {
+            let hidden = state.settings.show_hidden;
+            state
+                .tree
+                .loaded(generation, result, hidden)
+                .into_iter()
+                .collect()
+        }
         Msg::Error(message) => {
             state.toast(message, crate::state::ToastKind::Error);
             vec![]

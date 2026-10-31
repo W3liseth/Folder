@@ -322,6 +322,9 @@ pub fn update_settings(state: &mut AppState, new: Settings) -> Vec<Effect> {
             fx.extend(nav::load(state, id, loc, false));
         }
     }
+    if old.show_hidden != state.settings.show_hidden {
+        fx.extend(state.tree.reload_all(state.settings.show_hidden));
+    }
     if !old.show_preview && state.settings.show_preview {
         fx.extend(nav::after_selection(state));
     }

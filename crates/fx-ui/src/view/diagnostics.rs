@@ -100,6 +100,15 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                     ),
                 );
                 kv(
+                    "Arborescence latérale",
+                    format!(
+                        "{} / {} dossiers ouverts ({} Ko)",
+                        f.state.tree.len(),
+                        fx_app::tree::MAX_OPEN,
+                        f.state.tree.heap_bytes() / 1024
+                    ),
+                );
+                kv(
                     "Premier lot",
                     pane.first_batch_after.map_or("—".into(), |t| {
                         format!("{:.1} ms", t.as_secs_f64() * 1000.0)

@@ -14,6 +14,7 @@ pub mod ops;
 pub mod scheduler;
 pub mod state;
 pub mod system;
+pub mod tree;
 pub mod update;
 pub mod upgrade;
 

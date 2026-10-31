@@ -413,6 +413,10 @@ pub fn install(ctx: &egui::Context, accent: Color32) {
         // Animations brèves : le rendu CPU paie chaque image.
         style.animation_time = 0.12;
         style.interaction.tooltip_delay = 0.5;
+        // Libellés d'interface (sections, barre d'état…) non sélectionnables, comme dans
+        // une application Windows ; le contenu qu'on peut vouloir copier (aperçu, valeurs
+        // des Propriétés) le redemande avec `Label::selectable(true)`.
+        style.interaction.selectable_labels = false;
     });
 }
 

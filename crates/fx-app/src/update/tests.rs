@@ -1837,3 +1837,96 @@ fn select_all_works_in_the_disk_analysis() {
     update(&mut s, Msg::Command(CommandId::InvertSelection));
     assert_eq!(s.pane().selection.count(), 0);
 }
+
+fn subdirs_gen(effects: &[Effect], dir: &str) -> u64 {
+    effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::ListSubdirs {
+                generation, path, ..
+            } if path == Path::new(dir) => Some(*generation),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("pas de lecture de {dir} dans {effects:?}"))
+}
+
+fn subdirs(names: &[&str]) -> crate::tree::SubDirs {
+    let mut d = crate::tree::SubDirs::default();
+    for n in names {
+        d.push(n.as_bytes(), attrs::DIRECTORY);
+    }
+    d.finish();
+    d
+}
+
+#[test]
+fn sidebar_tree_follows_folder_changes() {
+    use crate::tree::TreeSection;
+    let mut s = state();
+    open(&mut s, r"C:\a", &[("x", true), ("f.txt", false)]);
+    let toggle = |root: &str, path: &str| Msg::ToggleTree {
+        section: TreeSection::Drives,
+        root: root.into(),
+        path: path.into(),
+    };
+    let g = subdirs_gen(&update(&mut s, toggle(r"C:\", r"C:\")), r"C:\");
+    update(
+        &mut s,
+        Msg::SubdirsLoaded {
+            generation: g,
+            result: Ok(subdirs(&["a"])),
+        },
+    );
+    let g = subdirs_gen(&update(&mut s, toggle(r"C:\", r"C:\a")), r"C:\a");
+    update(
+        &mut s,
+        Msg::SubdirsLoaded {
+            generation: g,
+            result: Ok(subdirs(&["x"])),
+        },
+    );
+    assert_eq!(s.tree.len(), 2);
+    let key = pane(&s).0;
+    let stat = |attributes| Stat {
+        attributes,
+        size: 0,
+        created: 0,
+        modified: 0,
+    };
+    // Fichier modifié, sous-dossier déjà connu : rien à relire.
+    let fx = update(
+        &mut s,
+        Msg::DirChanged(DirEvent {
+            key,
+            changes: vec![
+                Change::Upsert {
+                    name: "f.txt".encode_utf16().collect(),
+                    stat: stat(0),
+                },
+                Change::Upsert {
+                    name: "x".encode_utf16().collect(),
+                    stat: stat(attrs::DIRECTORY),
+                },
+            ],
+        }),
+    );
+    assert!(!fx.iter().any(|e| matches!(e, Effect::ListSubdirs { .. })));
+    // Nouveau sous-dossier : relecture de C:\a dans l'arborescence.
+    let fx = update(
+        &mut s,
+        Msg::DirChanged(DirEvent {
+            key,
+            changes: vec![Change::Upsert {
+                name: "y".encode_utf16().collect(),
+                stat: stat(attrs::DIRECTORY),
+            }],
+        }),
+    );
+    subdirs_gen(&fx, r"C:\a");
+    // Actualiser relit tout ce qui est ouvert (C:\a encore en cours : relu à son arrivée).
+    let fx = update(&mut s, Msg::Command(CommandId::Refresh));
+    subdirs_gen(&fx, r"C:\");
+    // Refermer la racine libère tout.
+    update(&mut s, toggle(r"C:\", r"C:\"));
+    assert!(s.tree.is_empty());
+}

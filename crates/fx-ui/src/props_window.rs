@@ -973,7 +973,7 @@ fn grid(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
 
 fn field(ui: &mut Ui, pal: &Palette, label: &str, value: &str) {
     ui.label(RichText::new(label).color(pal.text2));
-    ui.add(egui::Label::new(value).wrap());
+    ui.add(egui::Label::new(value).wrap().selectable(true));
     ui.end_row();
 }
 

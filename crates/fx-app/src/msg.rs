@@ -242,6 +242,17 @@ pub enum Msg {
         done: bool,
     },
     WslLoaded(Vec<String>),
+    /// Ouvre ou referme `path` dans l'arborescence de la barre latérale : racine `root` de
+    /// `section`, ou l'un de ses sous-dossiers.
+    ToggleTree {
+        section: crate::tree::TreeSection,
+        root: PathBuf,
+        path: PathBuf,
+    },
+    SubdirsLoaded {
+        generation: u64,
+        result: Result<crate::tree::SubDirs, String>,
+    },
 
     // --- Analyse de l'espace (cf. `disk`) ---
     /// Analyse `path` dans le volet actif (une analyse déjà ouverte qui le contient est

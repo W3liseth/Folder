@@ -111,6 +111,14 @@ pub enum Effect {
         parsing: String,
     },
     LoadWsl,
+    /// Sous-dossiers de `path` pour l'arborescence de la barre latérale (cf. `tree`) ;
+    /// répond par `Msg::SubdirsLoaded`.
+    ListSubdirs {
+        generation: u64,
+        path: PathBuf,
+        show_hidden: bool,
+        cancel: CancelToken,
+    },
     /// Fenêtre Paramètres (processus `--settings`), ou ramenée au premier plan si ouverte ;
     /// `notes` : ouverte sur les notes de version.
     SettingsWindow {

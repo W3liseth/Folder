@@ -544,6 +544,32 @@ impl Scheduler {
             Effect::LoadWsl => self.io(move || {
                 out.send(Msg::WslLoaded(fx_win::sys::wsl_distributions()));
             }),
+            Effect::ListSubdirs {
+                generation,
+                path,
+                show_hidden,
+                cancel,
+            } => self.io(move || {
+                let opts = fx_fs::EnumOptions {
+                    show_hidden,
+                    allocated: false,
+                };
+                let mut dirs = crate::tree::SubDirs::default();
+                let result = fx_fs::enumerate(&path, &opts, &cancel, |batch| {
+                    for e in batch.entries.iter().filter(|e| e.is_dir()) {
+                        dirs.push(batch.names.get(e.name), e.attributes);
+                    }
+                });
+                let result = match result {
+                    Ok(Outcome::Cancelled) => return,
+                    Ok(Outcome::Completed(_)) => {
+                        dirs.finish();
+                        Ok(dirs)
+                    }
+                    Err(e) => Err(e.message().trim().to_owned()),
+                };
+                out.send(Msg::SubdirsLoaded { generation, result });
+            }),
             Effect::SettingsWindow { notes } => {
                 let owner = self.owner.load(Ordering::Relaxed);
                 self.io(move || {

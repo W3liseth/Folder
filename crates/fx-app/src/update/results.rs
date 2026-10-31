@@ -163,20 +163,53 @@ pub fn column_finished(state: &mut AppState, pane: PaneId, generation: u64) -> V
 
 pub fn dir_changed(state: &mut AppState, ev: DirEvent) -> Vec<Effect> {
     let pane = PaneId(ev.key);
-    if ev.changes.contains(&Change::Rescan) {
-        let Some(Location::Dir(dir)) = state.find_pane(pane).map(|p| p.location().clone()) else {
-            return vec![];
-        };
-        return nav::load(state, pane, Location::Dir(dir), false);
-    }
-    apply_changes(state, pane, &ev.changes);
     let dir = state.find_pane(pane).and_then(|p| match p.location() {
         Location::Dir(d) => Some(d.clone()),
         _ => None,
     });
-    dir.and_then(|d| stale_preview(state, &d, &ev.changes))
-        .into_iter()
-        .collect()
+    let mut fx = dir
+        .as_deref()
+        .map_or_else(Vec::new, |d| tree_changes(state, d, &ev.changes));
+    if ev.changes.contains(&Change::Rescan) {
+        let Some(dir) = dir else {
+            return fx;
+        };
+        fx.extend(nav::load(state, pane, Location::Dir(dir), false));
+        return fx;
+    }
+    apply_changes(state, pane, &ev.changes);
+    fx.extend(dir.and_then(|d| stale_preview(state, &d, &ev.changes)));
+    fx
+}
+
+/// Relecture de `dir` dans l'arborescence de la barre latérale, s'il y est ouvert et qu'un
+/// sous-dossier apparaît ou disparaît (les changements de fichiers ne la concernent pas).
+fn tree_changes(state: &mut AppState, dir: &Path, changes: &[Change]) -> Vec<Effect> {
+    if !state.tree.is_open(dir) {
+        return vec![];
+    }
+    let show_hidden = state.settings.show_hidden;
+    let mut b = Vec::new();
+    let touched = changes.iter().any(|c| match c {
+        Change::Upsert { name, stat } => {
+            b.clear();
+            wtf8::push_utf16(&mut b, name);
+            let dir_now = stat.attributes & attrs::DIRECTORY != 0
+                && (show_hidden || stat.attributes & attrs::HIDDEN == 0);
+            dir_now != state.tree.lists(dir, &b)
+        }
+        Change::Remove { name } => {
+            b.clear();
+            wtf8::push_utf16(&mut b, name);
+            state.tree.lists(dir, &b)
+        }
+        Change::Rescan => true,
+    });
+    if touched {
+        state.tree.changed(dir, show_hidden)
+    } else {
+        vec![]
+    }
 }
 
 /// Relecture de l'aperçu si le fichier affiché vient d'être réécrit (date ou taille changée).
@@ -213,7 +246,9 @@ pub fn paths_changed(state: &mut AppState, dir: &Path, changes: &[Change]) -> Ve
     for pane in panes {
         apply_changes(state, pane, changes);
     }
-    stale_preview(state, dir, changes).into_iter().collect()
+    let mut fx = tree_changes(state, dir, changes);
+    fx.extend(stale_preview(state, dir, changes));
+    fx
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {

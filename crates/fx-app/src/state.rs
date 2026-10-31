@@ -407,6 +407,8 @@ pub struct AppState {
     pub recent: Vec<RecentItem>,
     /// Distributions WSL installées.
     pub wsl: Vec<String>,
+    /// Dossiers déroulés de la barre latérale.
+    pub tree: crate::tree::FolderTree,
     /// Analyses de l'espace (en cours ou terminées), bornées (cf. `disk::MAX_SCANS`).
     pub disk_scans: Vec<crate::disk::DiskScan>,
     /// Dernière relecture de l'espace des lecteurs demandée pendant une opération.
@@ -456,6 +458,7 @@ impl AppState {
             known: Vec::new(),
             recent: Vec::new(),
             wsl: Vec::new(),
+            tree: crate::tree::FolderTree::default(),
             disk_scans: Vec::new(),
             drives_requested: None,
             tags,

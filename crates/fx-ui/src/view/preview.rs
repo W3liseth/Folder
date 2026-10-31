@@ -192,7 +192,7 @@ fn properties(ui: &mut Ui, f: &mut Fx<'_>, p: &fx_preview::Preview) {
         .show(ui, |ui| {
             let mut kv = |k: &str, v: String| {
                 ui.label(RichText::new(k).color(pal.text2));
-                ui.label(v);
+                ui.add(egui::Label::new(v).selectable(true));
                 ui.end_row();
             };
             if p.attributes & 0x10 == 0 {
@@ -276,7 +276,7 @@ fn code(ui: &mut Ui, f: &Fx<'_>, text: &str, lang: fx_preview::Lang, truncated: 
         .inner_margin(8)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
         .show(ui, |ui| {
-            ui.label(job);
+            ui.add(egui::Label::new(job).selectable(true));
         });
     if truncated || lines_cut {
         ui.label(RichText::new("Aperçu tronqué").small().color(pal.text3));
@@ -325,10 +325,10 @@ fn markdown(ui: &mut Ui, f: &Fx<'_>, blocks: &[MdBlock]) {
                 for s in &mut bold {
                     s.bold = true;
                 }
-                ui.label(spans_job(&bold, size, f, w));
+                ui.add(egui::Label::new(spans_job(&bold, size, f, w)).selectable(true));
             }
             MdBlock::Paragraph(spans) => {
-                ui.label(spans_job(spans, 13.5, f, w));
+                ui.add(egui::Label::new(spans_job(spans, 13.5, f, w)).selectable(true));
             }
             MdBlock::Item {
                 depth,
@@ -341,7 +341,7 @@ fn markdown(ui: &mut Ui, f: &Fx<'_>, blocks: &[MdBlock]) {
                         RichText::new(number.map_or_else(|| "•".to_owned(), |n| format!("{n}.")))
                             .color(pal.text2),
                     );
-                    ui.label(spans_job(spans, 13.5, f, w - 40.0));
+                    ui.add(egui::Label::new(spans_job(spans, 13.5, f, w - 40.0)).selectable(true));
                 });
             }
             MdBlock::Quote(spans) => {
@@ -359,7 +359,9 @@ fn markdown(ui: &mut Ui, f: &Fx<'_>, blocks: &[MdBlock]) {
                             r.y_range(),
                             egui::Stroke::new(3.0, pal.stroke_strong),
                         );
-                        ui.label(spans_job(spans, 13.5, f, w - 20.0));
+                        ui.add(
+                            egui::Label::new(spans_job(spans, 13.5, f, w - 20.0)).selectable(true),
+                        );
                     });
             }
             MdBlock::Code { text, lang } => {

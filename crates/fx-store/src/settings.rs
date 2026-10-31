@@ -33,6 +33,16 @@ impl Layout {
     }
 }
 
+/// Section repliable de la barre latérale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SidebarSection {
+    QuickAccess,
+    Drives,
+    Network,
+    Wsl,
+    Tags,
+}
+
 /// Réglages utilisateur. Tout champ absent du fichier prend sa valeur par défaut, ce qui
 /// rend les ajouts de réglages compatibles avec les anciens fichiers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,6 +68,8 @@ pub struct Settings {
     pub grid_size: u16,
     pub show_sidebar: bool,
     pub sidebar_width: f32,
+    /// Sections de la barre latérale repliées.
+    pub sidebar_collapsed: Vec<SidebarSection>,
     pub show_preview: bool,
     pub preview_width: f32,
     pub restore_session: bool,
@@ -100,6 +112,7 @@ impl Default for Settings {
             grid_size: 96,
             show_sidebar: true,
             sidebar_width: 230.0,
+            sidebar_collapsed: Vec::new(),
             show_preview: false,
             preview_width: 320.0,
             restore_session: true,

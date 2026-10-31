@@ -947,7 +947,15 @@ télémétrie distante.
   omnibar (fil d'Ariane cliquable, édition du chemin), page d'accueil (accès rapide,
   lecteurs avec jauge, étiquettes, fichiers récents), barre latérale (accueil, accès rapide
   avec la corbeille, lecteurs, réseau, distributions WSL lues dans le registre, étiquettes ;
-  icônes de Windows), restauration de session (onglets, dossiers ouverts,
+  icônes de Windows ; sections repliables, état gardé dans `sidebar_collapsed` ; épingles,
+  lecteurs et distributions WSL déroulables en arborescence de dossiers par une flèche :
+  `fx_app::tree`, sous-dossiers lus sur un thread d'I/O (`Effect::ListSubdirs`, annulés à la
+  fermeture), une `NameArena` par dossier ouvert, au plus 256 dossiers ouverts et 20 000
+  sous-dossiers par dossier (overlay F12), relus sur Actualiser, au changement d'« éléments
+  masqués » et quand la surveillance ou une opération signale un sous-dossier ajouté ou
+  retiré ; lignes de même hauteur entre deux dossiers ouverts, seules les visibles sont
+  construites), libellés d'interface non sélectionnables (seuls l'aperçu et les valeurs des
+  Propriétés le sont), restauration de session (onglets, dossiers ouverts,
   écran, taille et état agrandi de la fenêtre : créée cachée, placée par
   `SetWindowPlacement` en pixels physiques puis affichée directement dans son état final), branche Git en bas à droite de la barre d'état (logo, menu des branches locales et distantes, changement de branche par `git switch` sur un thread temporaire, dossier relu ensuite).
 - **Vues** : Détails (colonnes ancrées à gauche comme l'Explorateur : chaque séparateur ne
