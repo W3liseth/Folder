@@ -552,6 +552,104 @@ fn dual_pane_toggle_and_open_in_other_pane() {
     assert!(matches!(&fx[..], [Effect::Unwatch { .. }]));
 }
 
+/// Onglet en double volet : gauche dans `C:\a`, droite dans `C:\b` (volet de droite actif).
+fn dual_tab() -> (AppState, PaneId, PaneId) {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    update(&mut s, Msg::Command(CommandId::ToggleDualPane));
+    let (left, right) = (s.tab().panes[0].id, s.tab().panes[1].id);
+    update(
+        &mut s,
+        Msg::NavigatePane(right, Location::Dir(r"C:\b".into())),
+    );
+    (s, left, right)
+}
+
+#[test]
+fn dual_tab_title_names_both_folders() {
+    let (s, ..) = dual_tab();
+    assert_eq!(s.tab().title(), "a | b");
+    assert!(s.command_context().dual_pane);
+}
+
+#[test]
+fn close_left_or_right_pane() {
+    let (mut s, left, right) = dual_tab();
+    let fx = update(&mut s, Msg::Command(CommandId::CloseLeftPane));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Unwatch { key } if *key == left.0))
+    );
+    assert_eq!(s.tab().panes.len(), 1);
+    assert_eq!(s.pane().id, right);
+    assert_eq!(s.tab().title(), "b");
+    // Plus de double volet : sans effet.
+    assert!(update(&mut s, Msg::Command(CommandId::CloseRightPane)).is_empty());
+
+    let (mut s, left, right) = dual_tab();
+    let fx = update(&mut s, Msg::Command(CommandId::CloseRightPane));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Unwatch { key } if *key == right.0))
+    );
+    assert_eq!(s.pane().id, left);
+    assert_eq!(s.tabs.len(), 1);
+}
+
+#[test]
+fn separate_panes_into_two_tabs() {
+    let (mut s, left, right) = dual_tab();
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    update(&mut s, Msg::SelectTab(0));
+    let fx = update(&mut s, Msg::Command(CommandId::SeparatePanes));
+    // Rien à recharger ni à cesser de surveiller : les volets changent seulement d'onglet.
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::Enumerate { .. } | Effect::Unwatch { .. }))
+    );
+    assert_eq!(s.tabs.len(), 3);
+    assert_eq!(
+        s.tabs[0].panes.iter().map(|p| p.id).collect::<Vec<_>>(),
+        [left]
+    );
+    assert_eq!(
+        s.tabs[1].panes.iter().map(|p| p.id).collect::<Vec<_>>(),
+        [right]
+    );
+    assert_eq!(s.tabs[2].active_pane().location(), &Location::Home);
+    // Le volet actif (droite) reste affiché.
+    assert_eq!((s.active_tab, s.pane().id), (1, right));
+    assert_ne!(s.tabs[0].id, s.tabs[1].id);
+}
+
+#[test]
+fn merge_tab_into_second_pane() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    update(&mut s, Msg::OpenInNewTab(Location::Dir(r"C:\b".into())));
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    let b = s.tabs[1].panes[0].id;
+    update(&mut s, Msg::SelectTab(2));
+    let fx = update(&mut s, Msg::MergeTabIntoPane(1));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Enumerate { .. })));
+    assert_eq!(s.tabs.len(), 2);
+    // L'onglet actif (l'accueil, passé de 2 à 1) a reçu le volet de « b », actif à droite.
+    assert_eq!(s.active_tab, 1);
+    assert_eq!(s.tab().panes.len(), 2);
+    assert_eq!((s.tab().active, s.pane().id), (1, b));
+    assert_eq!(s.tab().title(), "Accueil | b");
+    // Déjà en double volet, onglet actif lui-même, index hors limites : sans effet.
+    update(&mut s, Msg::MergeTabIntoPane(0));
+    assert_eq!(s.tabs.len(), 2);
+    update(&mut s, Msg::SelectTab(0));
+    update(&mut s, Msg::MergeTabIntoPane(0));
+    update(&mut s, Msg::MergeTabIntoPane(9));
+    assert_eq!(s.tabs.len(), 2);
+    // Un onglet en double volet ne s'intègre pas.
+    update(&mut s, Msg::MergeTabIntoPane(1));
+    assert_eq!((s.tabs.len(), s.tab().panes.len()), (2, 1));
+}
+
 #[test]
 fn new_folder_gets_unique_name_then_inline_rename() {
     let mut s = state();

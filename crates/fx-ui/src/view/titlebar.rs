@@ -277,7 +277,11 @@ fn tabs(ui: &mut Ui, f: &mut Fx<'_>, area: Rect) -> f32 {
         }
 
         let loc = tab.active_pane().location();
-        tab_face(ui, f, rect, loc, &tab.title(), active);
+        if tab.is_dual() {
+            dual_tab_face(ui, f, rect, tab, active);
+        } else {
+            tab_face(ui, f, rect, loc, &tab.title(), active);
+        }
         if dragged && floating && detachable {
             // Ce que fera le relâchement (s'il ne rejoint pas une autre fenêtre).
             super::dnd::ghost(
@@ -357,9 +361,13 @@ fn tabs(ui: &mut Ui, f: &mut Fx<'_>, area: Rect) -> f32 {
             }
         });
         if drag.is_none() {
-            resp.on_hover_text(match tab.active_pane().location() {
-                Location::Dir(p) => p.display().to_string(),
-                other => other.title(),
+            resp.on_hover_text(match tab.panes.as_slice() {
+                [a, b, ..] => format!(
+                    "Gauche : {}\nDroite : {}",
+                    full_name(a.location()),
+                    full_name(b.location())
+                ),
+                _ => full_name(tab.active_pane().location()),
             });
         }
     }
@@ -484,10 +492,17 @@ fn flare(tab: Rect, side: f32, fill: Color32) -> egui::Shape {
     ))
 }
 
-/// Icône et titre d'un onglet.
-fn tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, loc: &Location, title: &str, active: bool) {
-    let pal = f.pal;
-    let g = match loc {
+/// Chemin complet d'un dossier, titre des autres emplacements (infobulles).
+fn full_name(loc: &Location) -> String {
+    match loc {
+        Location::Dir(p) => p.display().to_string(),
+        other => other.title(),
+    }
+}
+
+/// Glyphe d'un emplacement (onglets, menu du double volet).
+pub(crate) fn location_glyph(loc: &Location) -> &'static str {
+    match loc {
         Location::Home => glyph::HOME,
         Location::Search { .. } => glyph::SEARCH,
         Location::Tag(_) => glyph::TAG,
@@ -496,7 +511,90 @@ fn tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, loc: &Location, title: &str
         Location::RecycleBin => glyph::RECYCLE,
         Location::Network(_) => glyph::NETWORK,
         Location::DiskUsage { .. } => glyph::PIE,
+    }
+}
+
+/// Zone du titre d'un onglet (entre l'icône et le bouton de fermeture).
+fn title_rect(rect: Rect) -> Rect {
+    Rect::from_min_max(
+        pos2(rect.left() + 32.0, rect.top()),
+        pos2(rect.right() - 28.0, rect.bottom()),
+    )
+}
+
+/// Onglet en double volet : icône « double volet » et les noms des deux dossiers, séparés
+/// d'un trait. Faute de place, chacun garde au moins la moitié de la largeur (les deux
+/// restent lisibles) ; le nom du volet actif ressort quand l'onglet est actif.
+fn dual_tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, tab: &fx_app::Tab, active: bool) {
+    const PAD: f32 = 6.0;
+    let pal = f.pal;
+    ui.painter().text(
+        pos2(rect.left() + 18.0, rect.center().y),
+        Align2::CENTER_CENTER,
+        glyph::DUAL,
+        icon_font(14.0),
+        if active { pal.accent } else { pal.text2 },
+    );
+    let font = if active {
+        semibold(13.0)
+    } else {
+        FontId::proportional(13.0)
     };
+    let names = [
+        tab.panes[0].location().title(),
+        tab.panes[1].location().title(),
+    ];
+    let galleys = names.map(|n| {
+        f.vs.fallbacks.scan(&n);
+        ui.painter()
+            .layout_no_wrap(n, font.clone(), Color32::PLACEHOLDER)
+    });
+    // Couleur du volet actif : par position (deux dossiers de même nom restent distingués).
+    let colors = [0, 1].map(|i| {
+        if active && i == tab.active {
+            pal.text
+        } else {
+            pal.text2
+        }
+    });
+    let text = title_rect(rect);
+    let avail = (text.width() - 2.0 * PAD - 1.0).max(0.0);
+    let (wa, wb) = (galleys[0].size().x, galleys[1].size().x);
+    let half = avail / 2.0;
+    let (da, db) = if wa + wb <= avail {
+        (wa, wb)
+    } else if wa < half {
+        (wa, avail - wa)
+    } else if wb < half {
+        (avail - wb, wb)
+    } else {
+        (half, half)
+    };
+    let y = rect.center().y;
+    let a = Rect::from_min_max(
+        pos2(text.left(), text.top()),
+        pos2(text.left() + da, text.bottom()),
+    );
+    let sep_x = a.right() + PAD + 0.5;
+    let b = Rect::from_min_max(
+        pos2(sep_x + 0.5 + PAD, text.top()),
+        pos2(sep_x + 0.5 + PAD + db, text.bottom()),
+    );
+    for ((g, clip), color) in galleys.into_iter().zip([a, b]).zip(colors) {
+        let pos = pos2(clip.left(), y - g.size().y / 2.0);
+        ui.painter().with_clip_rect(clip).galley(pos, g, color);
+    }
+    ui.painter().vline(
+        sep_x,
+        rect.y_range().shrink(11.0),
+        egui::Stroke::new(1.0, pal.stroke_strong),
+    );
+}
+
+/// Icône et titre d'un onglet.
+fn tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, loc: &Location, title: &str, active: bool) {
+    let pal = f.pal;
+    let g = location_glyph(loc);
     let gc = if matches!(loc, Location::Dir(p) if p.parent().is_some()) {
         pal.folder
     } else {
@@ -516,10 +614,7 @@ fn tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, loc: &Location, title: &str
     } else {
         FontId::proportional(13.0)
     };
-    let text_rect = Rect::from_min_max(
-        pos2(rect.left() + 32.0, rect.top()),
-        pos2(rect.right() - 28.0, rect.bottom()),
-    );
+    let text_rect = title_rect(rect);
     ui.painter().with_clip_rect(text_rect).text(
         pos2(text_rect.left(), rect.center().y),
         Align2::LEFT_CENTER,

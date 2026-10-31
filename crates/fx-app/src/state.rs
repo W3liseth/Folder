@@ -205,8 +205,16 @@ impl Tab {
         &self.panes[self.active.min(self.panes.len() - 1)]
     }
 
+    /// Titre : le dossier affiché, ou ceux des deux volets (« gauche | droite »).
     pub fn title(&self) -> String {
-        self.active_pane().location().title()
+        match self.panes.as_slice() {
+            [a, b, ..] => format!("{} | {}", a.location().title(), b.location().title()),
+            _ => self.active_pane().location().title(),
+        }
+    }
+
+    pub fn is_dual(&self) -> bool {
+        self.panes.len() > 1
     }
 }
 

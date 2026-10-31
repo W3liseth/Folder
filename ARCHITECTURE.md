@@ -976,7 +976,10 @@ télémétrie distante.
   « tout sélectionner » au-dessus des icônes dans l'en-tête, ou en haut des vues Liste et
   Grille) ;
   recherche par frappe ; Ctrl + molette (et Ctrl + Plus/Moins)
-  pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **double volet** ; volet d'aperçu
+  pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **double volet**
+  (onglet titré « gauche | droite » ; le bouton ouvre le second volet sur le dossier en
+  cours ou y intègre un autre onglet, sans rechargement ; en double volet, il ferme l'un
+  des volets ou les sépare en deux onglets) ; volet d'aperçu
   (texte et code colorés, markdown, grande miniature, infos).
 - **Opérations** : `IFileOperation` avec progression (centre d'état : bouton de la barre de
   navigation à côté de Rechercher et de la palette, menu déroulant avec les opérations en

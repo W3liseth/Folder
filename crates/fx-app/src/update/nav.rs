@@ -353,6 +353,77 @@ fn remove_tab(state: &mut AppState, i: usize) -> (crate::state::Tab, Vec<Effect>
     (tab, fx)
 }
 
+/// Ferme le volet `index` (0 : gauche, 1 : droite) de l'onglet actif en double volet ;
+/// l'autre reste seul et prend le focus.
+pub fn close_pane(state: &mut AppState, index: usize) -> Vec<Effect> {
+    let tab = state.tab_mut();
+    if tab.panes.len() < 2 || index >= tab.panes.len() {
+        return vec![];
+    }
+    let removed = tab.panes.remove(index);
+    tab.active = 0;
+    if let Some(c) = &removed.cancel {
+        c.cancel();
+    }
+    forget_pane(state, removed.id);
+    let mut fx = vec![Effect::Unwatch { key: removed.id.0 }];
+    fx.extend(after_selection(state));
+    fx
+}
+
+/// Défait le double volet sans rien fermer : le volet de droite part dans un nouvel onglet,
+/// juste après, avec son contenu et son historique (rien à recharger). L'onglet qui garde le
+/// volet actif reste affiché.
+pub fn separate_panes(state: &mut AppState) -> Vec<Effect> {
+    if !state.tab().is_dual() {
+        return vec![];
+    }
+    let id = state.next_id();
+    let tab = state.tab_mut();
+    let right_active = tab.active == 1;
+    let pane = tab.panes.remove(1);
+    tab.active = 0;
+    let at = state.active_tab.min(state.tabs.len() - 1) + 1;
+    state.tabs.insert(
+        at,
+        crate::state::Tab {
+            id,
+            panes: vec![pane],
+            active: 0,
+        },
+    );
+    if right_active {
+        state.active_tab = at;
+    }
+    after_selection(state)
+}
+
+/// Intègre l'onglet `i` comme volet de droite de l'onglet actif : le volet passe tel quel
+/// (contenu, sélection, historique, surveillance), sans rechargement.
+pub fn merge_tab_into_pane(state: &mut AppState, i: usize) -> Vec<Effect> {
+    let current = state.active_tab.min(state.tabs.len() - 1);
+    if i >= state.tabs.len() || i == current || state.tab().is_dual() || state.tabs[i].is_dual() {
+        return vec![];
+    }
+    let mut merged = state.tabs.remove(i);
+    state.active_tab = if i < current { current - 1 } else { current };
+    let tab = state.tab_mut();
+    tab.panes.push(merged.panes.remove(0));
+    tab.active = 1;
+    state.renaming = None;
+    after_selection(state)
+}
+
+/// Oublie ce qui visait un volet disparu (renommage, menu Git).
+fn forget_pane(state: &mut AppState, id: PaneId) {
+    if state.renaming.is_some_and(|r| r.pane == id) {
+        state.renaming = None;
+    }
+    if state.git_menu.as_ref().is_some_and(|m| m.pane == id) {
+        state.git_menu = None;
+    }
+}
+
 /// Onglet parti dans une autre fenêtre : retiré (sans réouverture possible ici). Le
 /// dernier onglet ne passe pas par là : sa fenêtre se ferme.
 pub fn remove_moved_tab(state: &mut AppState, i: usize) -> Vec<Effect> {

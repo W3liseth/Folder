@@ -5,6 +5,15 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.10.3 — 2026-10-31
+
+- Double volet : l'onglet affiche les noms des deux dossiers (« gauche | droite »), avec
+  l'icône du double volet ; l'infobulle donne les deux chemins.
+- Le bouton « Double volet » ouvre un menu : second volet sur le dossier en cours, ou
+  intégration d'un autre onglet (avec son contenu et son historique, sans rechargement).
+- En double volet, ce menu permet de fermer le volet de gauche ou de droite, ou de séparer
+  les deux volets en deux onglets. Ces actions sont aussi dans la palette de commandes.
+
 ## 0.10.2 — 2026-10-31
 
 - Barre de titre : le bouton « Mettre à jour » est centré verticalement sur les boutons

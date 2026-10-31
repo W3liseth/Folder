@@ -55,6 +55,9 @@ pub enum Msg {
         index: usize,
     },
     FocusPane(PaneId),
+    /// L'onglet `i` (à un seul volet) quitte la barre et devient le volet de droite de
+    /// l'onglet actif (à un seul volet lui aussi), avec son contenu et son historique.
+    MergeTabIntoPane(usize),
     /// Ouvre un fichier avec son application par défaut (ou navigue si c'est un dossier).
     OpenPath(PathBuf),
     /// Texte validé dans la barre d'adresse (variables d'environnement déjà développées) :

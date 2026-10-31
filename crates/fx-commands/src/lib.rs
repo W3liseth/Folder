@@ -113,6 +113,9 @@ commands! {
     NewWindow => Tabs, "Nouvelle fenêtre", "\u{E737}", ["Ctrl+N"];
     ToggleDualPane => Tabs, "Double volet", "\u{E89F}", ["Ctrl+Shift+S"];
     FocusOtherPane => Tabs, "Volet suivant", "\u{E8AB}", ["Ctrl+Shift+Right"];
+    CloseLeftPane => Tabs, "Fermer le volet de gauche", "\u{E711}", [];
+    CloseRightPane => Tabs, "Fermer le volet de droite", "\u{E711}", [];
+    SeparatePanes => Tabs, "Séparer les volets en deux onglets", "\u{E8A7}", [];
     // Fichiers
     Open => Files, "Ouvrir", "\u{E8E5}", ["Enter"];
     OpenInNewTab => Files, "Ouvrir dans un nouvel onglet", "\u{E8A7}", ["Ctrl+Enter"];
@@ -206,7 +209,7 @@ impl CommandId {
             CloseTab => c.tabs > 1,
             NextTab | PreviousTab => c.tabs > 1,
             ReopenClosedTab => c.closed_tabs > 0,
-            FocusOtherPane => c.dual_pane,
+            FocusOtherPane | CloseLeftPane | CloseRightPane | SeparatePanes => c.dual_pane,
             Undo => c.can_undo,
             Redo => c.can_redo,
             EmptyRecycleBin => true,

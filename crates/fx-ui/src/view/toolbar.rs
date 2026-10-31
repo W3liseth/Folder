@@ -142,7 +142,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     if r.clicked() {
                         f.cmd(CommandId::TogglePreview);
                     }
-                    let dual = f.state.tab().panes.len() > 1;
+                    let dual = f.state.tab().is_dual();
                     let r = widgets::tool_button(
                         ui,
                         &pal,
@@ -155,12 +155,62 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                         "Double volet ({})",
                         f.shortcut(CommandId::ToggleDualPane)
                     ));
-                    if r.clicked() {
-                        f.cmd(CommandId::ToggleDualPane);
-                    }
+                    Popup::menu(&r).show(|ui| dual_menu(ui, f));
                 });
             });
         });
+}
+
+/// Menu du bouton « Double volet ». Volet unique : le second volet s'ouvre sur le dossier en
+/// cours, ou accueille un autre onglet (à un seul volet) qui quitte alors la barre. Double
+/// volet : fermer l'un des deux, ou les séparer en deux onglets.
+fn dual_menu(ui: &mut Ui, f: &mut Fx<'_>) {
+    widgets::menu_appear(ui);
+    ui.set_min_width(280.0);
+    let pal = f.pal;
+    if f.state.tab().is_dual() {
+        menu_cmd(ui, f, CommandId::CloseLeftPane, "");
+        menu_cmd(ui, f, CommandId::CloseRightPane, "");
+        ui.separator();
+        menu_cmd(ui, f, CommandId::SeparatePanes, "");
+        return;
+    }
+    let here = egui::Button::new(widgets::menu_entry(
+        glyph::DUAL,
+        "Ouvrir le dossier en cours",
+        &pal,
+    ))
+    .shortcut_text(f.shortcut(CommandId::ToggleDualPane));
+    if ui.add(here).clicked() {
+        f.cmd(CommandId::ToggleDualPane);
+        ui.close();
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Intégrer un onglet").color(pal.text2));
+    let state = f.state;
+    let mut any = false;
+    for (i, tab) in state.tabs.iter().enumerate() {
+        if i == state.active_tab || tab.is_dual() {
+            continue;
+        }
+        any = true;
+        let loc = tab.active_pane().location();
+        let entry = widgets::menu_entry(super::titlebar::location_glyph(loc), &tab.title(), &pal);
+        let mut r = ui.button(entry);
+        if let fx_app::Location::Dir(p) = loc {
+            r = r.on_hover_text(p.display().to_string());
+        }
+        if r.clicked() {
+            f.send(Msg::MergeTabIntoPane(i));
+            ui.close();
+        }
+    }
+    if !any {
+        ui.add_enabled(
+            false,
+            egui::Button::new(widgets::menu_entry("", "Aucun autre onglet ouvert", &pal)),
+        );
+    }
 }
 
 /// « Nouveau » : dossier ou document texte.

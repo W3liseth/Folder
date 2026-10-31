@@ -149,14 +149,8 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
         }],
         ToggleDualPane => {
             let loc = state.pane().location().clone();
-            if state.tab().panes.len() > 1 {
-                let tab = state.tab_mut();
-                let removed = tab.panes.remove(1);
-                tab.active = 0;
-                if let Some(c) = &removed.cancel {
-                    c.cancel();
-                }
-                vec![Effect::Unwatch { key: removed.id.0 }]
+            if state.tab().is_dual() {
+                nav::close_pane(state, 1)
             } else {
                 let pane = state.new_pane(Location::Home);
                 let id = pane.id;
@@ -166,6 +160,9 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
                 nav::load(state, id, loc, false)
             }
         }
+        CloseLeftPane => nav::close_pane(state, 0),
+        CloseRightPane => nav::close_pane(state, 1),
+        SeparatePanes => nav::separate_panes(state),
         FocusOtherPane => {
             let tab = state.tab_mut();
             tab.active = (tab.active + 1) % tab.panes.len();
