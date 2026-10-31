@@ -426,7 +426,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
                 Err(crate::tree::TooManyOpen) => {
                     state.toast(
                         format!(
-                            "Pas plus de {} dossiers ouverts dans la barre latérale :                              refermez-en quelques-uns.",
+                            "Pas plus de {} dossiers ouverts dans la barre latérale : refermez-en quelques-uns.",
                             crate::tree::MAX_OPEN
                         ),
                         ToastKind::Info,

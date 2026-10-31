@@ -53,6 +53,8 @@ pub fn run(owner: Option<isize>, notes: bool) -> Result<(), Error> {
         .with_app_id("folder-settings")
         .with_inner_size([940.0, 660.0])
         .with_min_inner_size([680.0, 460.0])
+        // Canal alpha conservé pour le fond Acrylic, comme la fenêtre principale.
+        .with_transparent(true)
         .with_visible(false);
     let config = egui_software_backend::SoftwareBackendAppConfiguration::new()
         .viewport_builder(viewport)
@@ -144,7 +146,15 @@ impl SettingsApp {
             theme::set_accent(&ctx, accent);
         }
         theme::apply(&ctx, self.state.settings.theme, accent);
-        let pal = Palette::new(ctx.theme() == egui::Theme::Dark, accent);
+        // Même fond Acrylic que la fenêtre principale (barre de titre native comprise), avec
+        // le même fondu quand on bascule l'effet depuis cette page.
+        crate::view::refresh_system_transparency(&mut self.vs);
+        let dark = ctx.theme() == egui::Theme::Dark;
+        if let Some(h) = self.hwnd {
+            let want = self.state.settings.acrylic && self.vs.system_transparency;
+            crate::view::apply_backdrop(&ctx, &mut self.vs, h, dark, want);
+        }
+        let pal = Palette::new(dark, accent).with_acrylic(self.vs.acrylic_t);
         if self.reload_tags_at.is_some_and(|t| t <= Instant::now()) {
             self.reload_tags_at = None;
             self.state.tags = load_tags(&self.paths);
@@ -165,7 +175,6 @@ impl SettingsApp {
             threads: 0,
         };
         f.vs.wheel.frame(&ctx);
-        crate::view::refresh_system_transparency(f.vs);
         crate::view::settings::page(ui, &mut f);
         let msgs = std::mem::take(&mut f.msgs);
         for m in msgs {

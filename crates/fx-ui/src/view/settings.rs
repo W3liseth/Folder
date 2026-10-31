@@ -232,7 +232,7 @@ fn appearance(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     let acrylic_hint = if system {
         "Fond translucide et flouté (Acrylic) derrière la fenêtre."
     } else {
-        "Sans effet pour l'instant : les « Effets de transparence » sont désactivés dans          Windows (Personnalisation › Couleurs)."
+        "Sans effet : transparence désactivée dans Windows."
     };
     let mut open_colors = false;
     setting(ui, f, "Effet de transparence", acrylic_hint, |ui| {
@@ -274,9 +274,11 @@ fn accent_setting(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
+                    // Place réservée à la case « Couleur de Windows » à droite.
+                    ui.set_max_width((ui.available_width() - 190.0).max(200.0));
                     ui.label("Couleur d'accentuation");
                     let desc = if f.vs.system_accent_neutral {
-                        "Boutons, sélection, indicateurs. L'accent de Windows étant gris,                          « Couleur de Windows » utilise le bleu de Windows."
+                        "Boutons, sélection, indicateurs. Accent de Windows gris : bleu de Windows utilisé."
                     } else {
                         "Boutons, sélection, indicateurs."
                     };

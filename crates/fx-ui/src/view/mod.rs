@@ -459,6 +459,19 @@ fn style_window(ctx: &egui::Context, vs: &mut ViewState, dark: bool, want: bool)
         vs.acrylic_t = if vs.backdrop { 1.0 } else { 0.0 };
         return;
     };
+    apply_backdrop(ctx, vs, h, dark, want);
+}
+
+/// Fond Acrylic de la fenêtre `h` (fenêtre principale ou Paramètres) et fondu de sa palette
+/// (`vs.acrylic_t`), cf. [`style_window`] ; à appeler à chaque image, avant de construire la
+/// palette.
+pub(crate) fn apply_backdrop(
+    ctx: &egui::Context,
+    vs: &mut ViewState,
+    h: isize,
+    dark: bool,
+    want: bool,
+) {
     if !want {
         vs.backdrop_refused = false;
     }

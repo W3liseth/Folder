@@ -624,15 +624,16 @@ pub trait Action: Send + Sync {
   Files.
   Fond **Acrylic** (Windows 11 22H2+, réglage `acrylic`, actif par défaut ; Paramètres ›
   Apparence › Effet de transparence) : `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`
-  sur la fenêtre principale, créée transparente (winit : `DwmEnableBlurBehindWindow`, région
+  sur la fenêtre principale et la fenêtre Paramètres (barre de titre native comprise, même
+  fondu : `view::apply_backdrop`), créées transparentes (winit : `DwmEnableBlurBehindWindow`, région
   vide), DWM composant alors son canal alpha prémultiplié. Marge de verre de 1 px seulement :
   étendue à toute la fenêtre, DWM y dessinerait ses propres boutons de légende. La palette
   (`Palette::with_acrylic`) pose une teinte légère sur `base` et `side` (barre de titre,
   barre latérale, barre d'état ; ~20 % en sombre, ~31 % en clair) et une couche à peine plus
   couvrante sur `layer` (onglet actif, barres de navigation et d'outils, liste ; ~47 % en
   sombre, ~57 % en clair) : le flou se voit franchement partout, la lisibilité repose sur les
-  contrastes de texte Fluent. Menus, dialogues et fenêtres restent opaques, comme les
-  fenêtres Paramètres et Propriétés. Typographie : titres de section et en-têtes de colonnes
+  contrastes de texte Fluent. Menus, dialogues et fenêtres internes restent opaques, comme la
+  fenêtre Propriétés. Typographie : titres de section et en-têtes de colonnes
   en casse normale (semi-gras 12,5 pt pour les sections, texte secondaire), comme Windows 11.
   DWM remplace ce fond par une couleur unie dès que la fenêtre perd le focus (passage dans
   Paramètres, autre application) : tant que l'Acrylic est demandé, un sous-classement
