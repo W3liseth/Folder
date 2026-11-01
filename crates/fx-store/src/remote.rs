@@ -36,6 +36,9 @@ pub enum Remote {
     /// Installer la mise à jour téléchargée : la fenêtre principale lance l'installeur et se
     /// ferme en enregistrant sa session.
     InstallUpdate,
+    /// Dossier ouvert par une autre application, folder étant le gestionnaire de fichiers
+    /// par défaut (`folder.exe --open-folder`) : nouvel onglet, fenêtre ramenée devant.
+    OpenFolder(PathBuf),
 }
 
 impl Remote {
@@ -52,6 +55,7 @@ impl Remote {
             }
             Self::TabHoverEnd => "E".to_owned(),
             Self::InstallUpdate => "U".to_owned(),
+            Self::OpenFolder(path) => format!("O{}", path.to_string_lossy()),
             // Une ligne par chemin (un chemin Windows ne contient pas de saut de ligne) :
             // positions, emplacement, puis l'historique préfixé par `<` ou `>`.
             Self::TabDrop {
@@ -103,6 +107,8 @@ impl Remote {
             }
             "E" => rest.is_empty().then_some(Self::TabHoverEnd),
             "U" => rest.is_empty().then_some(Self::InstallUpdate),
+            "O" => (!rest.is_empty() && !rest.contains('\n'))
+                .then(|| Self::OpenFolder(PathBuf::from(rest))),
             "A" => {
                 let mut lines = rest.split('\n');
                 let (at, grab) = parse_numbers(lines.next()?)?;
@@ -157,6 +163,7 @@ mod tests {
             ..Settings::default()
         };
         for r in [
+            Remote::OpenFolder(PathBuf::from(r"C:\Users\moi\Téléchargements")),
             Remote::Settings(Box::new(s)),
             Remote::SaveTag(Tag {
                 id: 0,

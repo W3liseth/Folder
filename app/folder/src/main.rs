@@ -95,7 +95,20 @@ fn main() -> ExitCode {
         };
     }
 
-    let args = match parse_args(std::env::args_os().skip(1)) {
+    // Dossier ouvert par une autre application (folder gestionnaire de fichiers par défaut) :
+    // nouvel onglet de la dernière fenêtre active, sinon nouvelle fenêtre sur ce dossier.
+    let mut args_os = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args_os.first().is_some_and(|a| a == fx_ui::OPEN_ARG) {
+        let Some(path) = args_os.get(1).map(PathBuf::from) else {
+            return ExitCode::from(2);
+        };
+        if fx_ui::open_in_last_window(&path) {
+            return ExitCode::SUCCESS;
+        }
+        args_os = vec![path.into_os_string()];
+    }
+
+    let args = match parse_args(args_os.into_iter()) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("{msg}\n\n{USAGE}");

@@ -30,6 +30,12 @@ pub fn startup(
     if state.settings.win_e_opens_folder {
         fx.push(Effect::EnsureWinE);
     }
+    if state.settings.default_file_manager {
+        fx.push(Effect::DefaultFileManager(true));
+    }
+    if !state.tags.is_empty() {
+        fx.push(Effect::CheckTagged(state.tags.paths()));
+    }
     let restore =
         session.filter(|s| state.settings.restore_session && !s.tabs.is_empty() && start.is_none());
     match restore {
@@ -88,16 +94,6 @@ pub fn load(
     } else {
         loc
     };
-    load_with(state, pane_id, loc, push_history, None)
-}
-
-/// Comme [`load`], sans rester dans l'analyse de l'espace (la quitter).
-pub fn load_exact(
-    state: &mut AppState,
-    pane_id: PaneId,
-    loc: Location,
-    push_history: bool,
-) -> Vec<Effect> {
     load_with(state, pane_id, loc, push_history, None)
 }
 
@@ -302,6 +298,8 @@ fn load_with(
             };
             pane.layout = Layout::Details;
             fx.push(Effect::Unwatch { key });
+            // Éléments supprimés hors de folder depuis le démarrage : oubliés au passage.
+            fx.push(Effect::CheckTagged(tagged.clone()));
             fx.push(Effect::ListPaths {
                 pane: pane_id,
                 generation,

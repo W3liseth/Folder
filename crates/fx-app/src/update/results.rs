@@ -649,6 +649,7 @@ pub fn op_finished(state: &mut AppState, op: u64, result: Result<bool, String>) 
     if let Some(i) = state.ops.iter().position(|o| o.id == op) {
         let o = state.ops.remove(i);
         let touched = o.touched();
+        fx.extend(super::edit::check_tagged_under(state, &touched));
         fx.extend(super::disk::after_op(state, &touched));
         fx.extend(restat_effect(state, touched));
         let ended = state.op_history.next_end(fx_win::time::now_filetime());

@@ -488,6 +488,46 @@ fn system_shortcuts_follow_settings() {
 }
 
 #[test]
+fn default_file_manager_follows_settings_and_startup() {
+    let dfm = |fx: &[Effect]| {
+        fx.iter().find_map(|e| match e {
+            Effect::DefaultFileManager(on) => Some(*on),
+            _ => None,
+        })
+    };
+    let mut s = state();
+    let start = |s: &mut AppState| {
+        update(
+            s,
+            Msg::Startup {
+                start: None,
+                session: None,
+            },
+        )
+    };
+    // Désactivé : le registre n'est jamais touché.
+    assert_eq!(dfm(&start(&mut s)), None);
+    let mut new = s.settings.clone();
+    new.default_file_manager = true;
+    assert_eq!(
+        dfm(&update(&mut s, Msg::UpdateSettings(Box::new(new.clone())))),
+        Some(true)
+    );
+    // Inchangé : rien à réappliquer.
+    assert_eq!(
+        dfm(&update(&mut s, Msg::UpdateSettings(Box::new(new.clone())))),
+        None
+    );
+    // Activé : réinscrit au démarrage (exécutable déplacé ou réinstallé).
+    assert_eq!(dfm(&start(&mut s)), Some(true));
+    new.default_file_manager = false;
+    assert_eq!(
+        dfm(&update(&mut s, Msg::UpdateSettings(Box::new(new)))),
+        Some(false)
+    );
+}
+
+#[test]
 fn startup_ensures_win_e_helper_only_when_enabled() {
     let has = |fx: &[Effect]| fx.iter().any(|e| matches!(e, Effect::EnsureWinE));
     let mut s = state();
@@ -1073,6 +1113,84 @@ fn tags_and_tag_location() {
     assert!(fx.iter().any(
         |e| matches!(e, Effect::ListPaths { paths, .. } if paths == &[PathBuf::from(r"C:\a\f.txt")])
     ));
+}
+
+#[test]
+fn deleted_tagged_items_leave_the_tag_count() {
+    let mut s = state();
+    update(
+        &mut s,
+        Msg::SetTag {
+            paths: vec![
+                r"C:\a\dossier".into(),
+                r"C:\a\dossier\note.txt".into(),
+                r"C:\a\f.txt".into(),
+            ],
+            tag: 1,
+            on: true,
+        },
+    );
+    assert_eq!(s.tags.count(1), 3);
+    // Au démarrage, tous les chemins étiquetés sont vérifiés.
+    let fx = update(
+        &mut s,
+        Msg::Startup {
+            start: None,
+            session: None,
+        },
+    );
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::CheckTagged(p) if p.len() == 3))
+    );
+
+    // Suppression du dossier : on vérifie ses chemins étiquetés, et seulement eux.
+    open(&mut s, r"C:\a", &[("dossier", true), ("f.txt", false)]);
+    let p = pane(&s);
+    update(
+        &mut s,
+        Msg::Click {
+            pane: p,
+            pos: 0,
+            ctrl: false,
+            shift: false,
+        },
+    );
+    update(&mut s, Msg::Command(CommandId::Delete));
+    let op = op_id(&update(&mut s, Msg::ConfirmDialog));
+    let fx = update(
+        &mut s,
+        Msg::OpFinished {
+            op,
+            result: Ok(false),
+        },
+    );
+    let mut checked = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::CheckTagged(p) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("vérification");
+    checked.sort();
+    assert_eq!(
+        checked,
+        [
+            PathBuf::from(r"C:\a\dossier"),
+            PathBuf::from(r"C:\a\dossier\note.txt")
+        ]
+    );
+
+    // Introuvables : étiquettes oubliées, en mémoire et dans la base.
+    let fx = update(&mut s, Msg::TaggedMissing(checked));
+    assert_eq!(
+        fx.iter()
+            .filter(|e| matches!(e, Effect::Persist(Persist::Tags { tags, .. }) if tags.is_empty()))
+            .count(),
+        2
+    );
+    assert_eq!(s.tags.count(1), 1);
+    assert_eq!(s.tags.of(Path::new(r"C:\a\f.txt")), &[1]);
 }
 
 #[test]
@@ -1688,6 +1806,8 @@ fn analyze_space_scans_then_lists_with_folder_sizes() {
     // Pendant l'analyse : pas encore de liste.
     assert!(!fx.iter().any(|e| matches!(e, Effect::Enumerate { .. })));
     assert_eq!(s.pane().status, ListingStatus::Idle);
+    let tab = s.active_tab;
+    update(&mut s, Msg::CloseTab(tab));
     s.disk_scans.clear();
 
     analyzed(&mut s, Vec::new());
@@ -1719,10 +1839,48 @@ fn analyze_space_scans_then_lists_with_folder_sizes() {
     assert_eq!(s.pane().location(), &Location::Dir(PathBuf::from(r"C:\")));
     update(&mut s, Msg::Command(CommandId::Back));
     let p = pane(&s);
+    // Fermer l'analyse ferme son onglet ; on retrouve l'onglet d'avant.
+    let before = s.tabs[0].active_pane().location().clone();
     update(&mut s, Msg::CloseDiskUsage(p));
-    assert_eq!(s.pane().location(), &Location::Dir(PathBuf::from(r"C:\r")));
+    assert_eq!((s.tabs.len(), s.active_tab), (1, 0));
+    assert_eq!(s.pane().location(), &before);
     // L'analyse reste disponible pour y revenir.
     assert_eq!(s.disk_scans.len(), 1);
+}
+
+#[test]
+fn analyze_space_opens_a_new_tab_without_replacing_a_pane() {
+    let (mut s, left, right) = dual_tab();
+    let fx = update(&mut s, Msg::AnalyzeSpace(PathBuf::from(r"C:\r")));
+    scan_id(&fx);
+    // Le double volet reste intact dans son onglet.
+    assert_eq!(s.tabs.len(), 2);
+    let dual: Vec<(PaneId, &Location)> = s.tabs[0]
+        .panes
+        .iter()
+        .map(|p| (p.id, p.location()))
+        .collect();
+    assert_eq!(
+        dual,
+        [
+            (left, &Location::Dir(r"C:\a".into())),
+            (right, &Location::Dir(r"C:\b".into()))
+        ]
+    );
+    // L'analyse est affichée dans le nouvel onglet, seule.
+    assert_eq!((s.active_tab, s.tab().panes.len()), (1, 1));
+    assert_eq!(
+        s.pane().location(),
+        &Location::DiskUsage {
+            root: PathBuf::from(r"C:\r"),
+            dir: PathBuf::from(r"C:\r")
+        }
+    );
+    // La fermer ferme cet onglet et rend le double volet.
+    let p = pane(&s);
+    update(&mut s, Msg::CloseDiskUsage(p));
+    assert_eq!((s.tabs.len(), s.active_tab), (1, 0));
+    assert_eq!(s.tab().panes.len(), 2);
 }
 
 #[test]
@@ -1891,14 +2049,15 @@ fn analyzing_several_drives_opens_one_tab_each() {
         })
         .collect();
     assert_eq!(roots, vec![Path::new(r"C:\"), Path::new(r"D:\")]);
-    assert_eq!(s.tabs.len(), 2);
-    // L'onglet courant (premier lecteur) reste affiché.
-    assert_eq!(s.active_tab, 0);
+    // Un nouvel onglet par lecteur ; celui du premier est affiché.
+    assert_eq!(s.tabs.len(), 3);
+    assert_eq!(s.tabs[0].active_pane().location(), &Location::Home);
+    assert_eq!(s.active_tab, 1);
     assert!(
         matches!(s.pane().location(), Location::DiskUsage { root, .. } if root == Path::new(r"C:\"))
     );
     assert!(matches!(
-        s.tabs[1].active_pane().location(),
+        s.tabs[2].active_pane().location(),
         Location::DiskUsage { root, .. } if root == Path::new(r"D:\")
     ));
     assert_eq!(s.disk_scans.len(), 2);

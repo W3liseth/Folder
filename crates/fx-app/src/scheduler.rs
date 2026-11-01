@@ -168,6 +168,15 @@ impl Scheduler {
                     });
                 });
             }
+            Effect::CheckTagged(paths) => self.io(move || {
+                let missing: Vec<PathBuf> = paths
+                    .into_iter()
+                    .filter(|p| volume_present(p) && fx_win::sys::is_missing(p))
+                    .collect();
+                if !missing.is_empty() {
+                    out.send(Msg::TaggedMissing(missing));
+                }
+            }),
             Effect::ListPaths {
                 pane,
                 generation,
@@ -466,6 +475,17 @@ impl Scheduler {
                     }
                 });
             }
+            Effect::DefaultFileManager(on) => self.shell.spawn(move || {
+                let Ok(exe) = std::env::current_exe() else {
+                    return;
+                };
+                if let Err(e) = fx_win::default_fm::set_default(on.then_some(exe.as_path())) {
+                    out.send(Msg::Error(format!(
+                        "Gestionnaire de fichiers par défaut : {}",
+                        e.message().trim()
+                    )));
+                }
+            }),
             Effect::EnsureWinE => self.io(move || {
                 if fx_win::win_e::is_running() {
                     return;
@@ -668,6 +688,17 @@ impl Scheduler {
             }
         }
     }
+}
+
+/// Lecteur (ou partage) de `p` accessible : sur une clé débranchée ou un partage hors
+/// ligne, un élément introuvable n'a pas été supprimé, ses étiquettes sont gardées.
+fn volume_present(p: &Path) -> bool {
+    use std::path::Component;
+    let root: PathBuf = p
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    !root.as_os_str().is_empty() && fx_win::sys::stat(&root).is_some()
 }
 
 fn display(p: &Path) -> String {

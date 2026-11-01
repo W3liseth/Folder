@@ -53,6 +53,24 @@ pub fn stat(path: &Path) -> Option<Stat> {
     })
 }
 
+/// Vrai seulement si `path` est introuvable (fichier ou dossier). Un accès refusé, un
+/// partage réseau injoignable ou une autre erreur ne comptent pas comme une absence.
+pub fn is_missing(path: &Path) -> bool {
+    let w = crate::path::to_wide_extended(path);
+    let mut d = WIN32_FILE_ATTRIBUTE_DATA::default();
+    // SAFETY: chemin terminé par NUL ; `d` a le type attendu pour GetFileExInfoStandard.
+    unsafe {
+        GetFileAttributesExW(
+            PCWSTR(w.as_ptr()),
+            GetFileExInfoStandard,
+            (&raw mut d).cast(),
+        )
+    }
+    .op("GetFileAttributesExW")
+    .err()
+    .is_some_and(|e| e.is_not_found())
+}
+
 /// Remplace les attributs d'un fichier ou dossier (lecture seule, caché…).
 pub fn set_attributes(path: &Path, attributes: u32) -> Result<()> {
     let w = crate::path::to_wide_extended(path);
@@ -324,6 +342,16 @@ pub fn double_click_time() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_means_not_found_only() {
+        let windir = PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"));
+        assert!(!is_missing(&windir));
+        assert!(is_missing(&windir.join("folder-introuvable-7f3a")));
+        assert!(is_missing(
+            &windir.join(r"folder-introuvable-7f3a\sous\f.txt")
+        ));
+    }
 
     #[test]
     fn system_drive_and_known_folders() {

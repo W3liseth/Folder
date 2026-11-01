@@ -6,6 +6,7 @@
 pub mod clipboard;
 pub mod com;
 pub mod ctxmenu;
+pub mod default_fm;
 pub mod details;
 pub mod dir;
 pub mod error;

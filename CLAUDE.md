@@ -125,7 +125,7 @@ Les deux moteurs coexistent : **rendu CPU par défaut**, `--renderer glow` en op
 | Crate | Rôle | Règle clé |
 |---|---|---|
 | `fx-core` | types de domaine (`EntryMeta`, `DirSnapshot`, `DiskTree`, tri, sélection, formats) | aucune dépendance `windows`/`egui` |
-| `fx-win` | wrappers sûrs Win32/COM (énumération, `IFileOperation`, `IContextMenu`, presse-papiers, images, watch, DWM, HTTPS WinHTTP et signatures pour la mise à jour) | seul endroit avec `unsafe`, chaque bloc a `// SAFETY:` |
+| `fx-win` | wrappers sûrs Win32/COM (énumération, `IFileOperation`, `IContextMenu`, presse-papiers, images, watch, DWM, HTTPS WinHTTP et signatures pour la mise à jour, gestionnaire de fichiers par défaut) | seul endroit avec `unsafe`, chaque bloc a `// SAFETY:` |
 | `fx-fs` | énumération en flux, service de surveillance (IOCP), recherche récursive, zip, analyse de l'espace (`diskscan`) et suggestions de nettoyage (`cleanup`) | jamais de dépendance à l'UI |
 | `fx-shell` | worker STA : icônes, miniatures, ouvrir / ouvrir avec / propriétés | COM en STA uniquement |
 | `fx-commands` | métadonnées des commandes (macro `commands!`), raccourcis | toute action utilisateur a un `CommandId` |

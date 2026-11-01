@@ -55,40 +55,33 @@ pub fn scan_of<'a>(state: &'a AppState, root: &Path) -> Option<&'a DiskScan> {
     state.disk_scans.iter().find(|s| same_path(&s.root, root))
 }
 
-/// Ouvre l'analyse de `path` dans le volet actif.
-pub fn analyze(state: &mut AppState, path: PathBuf) -> Vec<Effect> {
+/// Ouvre l'analyse de `path` dans un nouvel onglet (à la fin, activé) : elle ne remplace
+/// jamais un volet existant, dont le double volet de l'onglet courant.
+fn open_tab(state: &mut AppState, path: PathBuf) -> Vec<Effect> {
     let root =
         covering(state, &path).map_or_else(|| path.clone(), |i| state.disk_scans[i].root.clone());
-    let pane = state.pane().id;
-    let mut fx = nav::load(state, pane, Location::DiskUsage { root, dir: path }, true);
-    if let Some(p) = state.find_pane_mut(pane) {
-        p.disk_tab = DiskTab::Content;
-    }
+    nav::open_tab(state, Location::DiskUsage { root, dir: path })
+}
+
+/// Ouvre l'analyse de `path` dans un nouvel onglet.
+pub fn analyze(state: &mut AppState, path: PathBuf) -> Vec<Effect> {
+    let mut fx = open_tab(state, path);
     fx.push(Effect::LoadDrives);
     fx
 }
 
-/// Analyse plusieurs lecteurs : le premier dans le volet actif, chacun des suivants dans
-/// un nouvel onglet (à la fin) ; l'onglet courant reste affiché. Les analyses tournent en
-/// parallèle (un coordinateur et 4 lecteurs chacune, le temps de l'analyse).
+/// Analyse plusieurs lecteurs, chacun dans un nouvel onglet (à la fin) ; celui du premier
+/// est affiché. Les analyses tournent en parallèle (un coordinateur et 4 lecteurs chacune,
+/// le temps de l'analyse).
 pub fn analyze_many(state: &mut AppState, roots: Vec<PathBuf>) -> Vec<Effect> {
     state.show_disk_picker = false;
-    let mut roots = roots.into_iter();
-    let Some(first) = roots.next() else {
+    if roots.is_empty() {
         return vec![];
-    };
-    let mut fx = analyze(state, first);
-    let current = state.active_tab;
-    for root in roots {
-        fx.extend(nav::open_tab(
-            state,
-            Location::DiskUsage {
-                root: root.clone(),
-                dir: root,
-            },
-        ));
     }
-    state.active_tab = current;
+    let first = state.tabs.len();
+    let mut fx: Vec<Effect> = roots.into_iter().flat_map(|r| open_tab(state, r)).collect();
+    state.active_tab = first;
+    fx.push(Effect::LoadDrives);
     fx
 }
 
@@ -248,13 +241,21 @@ pub fn cancel(state: &mut AppState, root: &Path) -> Vec<Effect> {
     vec![]
 }
 
-/// Quitte l'analyse : le dossier regardé s'ouvre normalement.
+/// « Fermer l'analyse » : ferme son onglet (son volet seulement s'il partage l'onglet en
+/// double volet). L'analyse elle-même reste en mémoire pour y revenir.
 pub fn close(state: &mut AppState, pane: PaneId) -> Vec<Effect> {
-    let Some(Location::DiskUsage { dir, .. }) = state.find_pane(pane).map(|p| p.location().clone())
-    else {
+    let Some((tab, index)) = state.tabs.iter().enumerate().find_map(|(t, tab)| {
+        let at = tab.panes.iter().position(|p| p.id == pane)?;
+        matches!(tab.panes[at].location(), Location::DiskUsage { .. }).then_some((t, at))
+    }) else {
         return vec![];
     };
-    nav::load_exact(state, pane, Location::Dir(dir), true)
+    if state.tabs[tab].panes.len() > 1 {
+        state.active_tab = tab;
+        nav::close_pane(state, index)
+    } else {
+        nav::close_tab(state, tab)
+    }
 }
 
 pub fn clean(state: &mut AppState, root: &Path, index: usize) -> Vec<Effect> {

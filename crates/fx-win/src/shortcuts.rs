@@ -92,7 +92,7 @@ fn set_run_value(key: &str, name: &str, exe: Option<&Path>) -> Result<()> {
     }
 }
 
-fn read_string(key: &str, name: &str) -> Option<String> {
+pub(crate) fn read_string(key: &str, name: &str) -> Option<String> {
     let (k, n) = (wide_str(key), wide_str(name));
     let mut buf = [0u16; 1024];
     let mut bytes = (buf.len() * 2) as u32;
@@ -114,7 +114,7 @@ fn read_string(key: &str, name: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..len]))
 }
 
-fn create_key(path: &str) -> Result<HKEY> {
+pub(crate) fn create_key(path: &str) -> Result<HKEY> {
     let w = wide_str(path);
     let mut key = HKEY::default();
     // SAFETY: chaîne terminée par NUL ; `key` reçoit une clé que l'appelant ferme.
@@ -136,7 +136,7 @@ fn create_key(path: &str) -> Result<HKEY> {
     Ok(key)
 }
 
-fn set_string(key: HKEY, name: &str, value: &str) -> Result<()> {
+pub(crate) fn set_string(key: HKEY, name: &str, value: &str) -> Result<()> {
     let name = wide_str(name);
     let data: Vec<u8> = value
         .encode_utf16()

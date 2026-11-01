@@ -5,6 +5,22 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.11.0 — 2026-11-01
+
+- Nouvelle option « Ouvrir les dossiers dans folder » (Paramètres › Raccourcis › Système) :
+  les dossiers ouverts depuis les autres applications (navigateur, Bureau, raccourcis)
+  s'ouvrent dans un nouvel onglet de la dernière fenêtre folder utilisée, ou dans une
+  nouvelle fenêtre si aucune n'est ouverte. Désactivée, l'Explorateur redevient
+  l'application par défaut. « Afficher dans le dossier » d'un navigateur ouvre le dossier
+  sans sélectionner le fichier.
+- Analyse de l'espace : elle s'ouvre toujours dans un nouvel onglet, sans remplacer un
+  volet (double volet compris) ; « Fermer l'analyse » ferme cet onglet.
+- Étiquettes : les éléments supprimés ne comptent plus dans le nombre affiché (barre
+  latérale, accueil, Paramètres). Leurs étiquettes sont oubliées, sauf sur un lecteur
+  débranché ou un partage hors ligne.
+- Paramètres : une longue description ne passe plus sous l'interrupteur, elle revient à la
+  ligne.
+
 ## 0.10.3 — 2026-10-31
 
 - Double volet : l'onglet affiche les noms des deux dossiers (« gauche | droite »), avec

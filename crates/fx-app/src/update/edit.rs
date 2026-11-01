@@ -306,6 +306,9 @@ pub fn update_settings(state: &mut AppState, new: Settings) -> Vec<Effect> {
             open_hotkey: s.open_hotkey,
         });
     }
+    if old.default_file_manager != s.default_file_manager {
+        fx.push(Effect::DefaultFileManager(s.default_file_manager));
+    }
     if old.show_preview && !s.show_preview {
         state.preview = None;
     }
@@ -348,4 +351,28 @@ pub fn set_tag(state: &mut AppState, paths: Vec<PathBuf>, tag: TagId, on: bool) 
         fx.push(Effect::Persist(Persist::Tags { path, tags: ids }));
     }
     fx
+}
+
+/// Oublie les étiquettes d'éléments supprimés : sinon les compteurs (barre latérale,
+/// accueil, Paramètres) les comptent encore alors que la vue de l'étiquette les masque.
+pub fn forget_tags(state: &mut AppState, paths: Vec<PathBuf>) -> Vec<Effect> {
+    let mut fx = Vec::new();
+    for path in paths {
+        if state.tags.of(&path).is_empty() {
+            continue;
+        }
+        state.tags.set(&path, Vec::new());
+        fx.push(Effect::Persist(Persist::Tags {
+            path,
+            tags: Vec::new(),
+        }));
+    }
+    fx
+}
+
+/// Vérification des chemins étiquetés situés sous `roots` (éléments touchés par une
+/// opération), rien si aucun ne l'est.
+pub(crate) fn check_tagged_under(state: &AppState, roots: &[PathBuf]) -> Option<Effect> {
+    let paths = state.tags.paths_under(roots);
+    (!paths.is_empty()).then_some(Effect::CheckTagged(paths))
 }

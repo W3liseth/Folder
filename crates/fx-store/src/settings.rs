@@ -83,6 +83,9 @@ pub struct Settings {
     pub keybindings: HashMap<CommandId, Vec<HotKey>>,
     /// Windows + E ouvre folder (une nouvelle fenêtre par appui) au lieu de l'Explorateur.
     pub win_e_opens_folder: bool,
+    /// Les dossiers ouverts par les autres applications s'ouvrent dans folder (nouvel
+    /// onglet de la dernière fenêtre active) au lieu de l'Explorateur (`fx_win::default_fm`).
+    pub default_file_manager: bool,
     /// Raccourci système qui ouvre folder, même fermé (inactif si Windows + E l'ouvre déjà).
     pub open_hotkey: Option<HotKey>,
     /// Recherche une nouvelle version (au plus une fois par heure) et la
@@ -121,6 +124,7 @@ impl Default for Settings {
             pinned_initialized: false,
             keybindings: HashMap::new(),
             win_e_opens_folder: false,
+            default_file_manager: false,
             open_hotkey: None,
             auto_update: true,
             col_name: 0.0,

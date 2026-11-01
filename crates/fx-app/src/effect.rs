@@ -75,6 +75,8 @@ pub enum Effect {
         generation: u64,
         paths: Vec<PathBuf>,
     },
+    /// Cherche, parmi ces chemins étiquetés, ceux qui n'existent plus (`Msg::TaggedMissing`).
+    CheckTagged(Vec<PathBuf>),
     Watch {
         key: u64,
         path: PathBuf,
@@ -208,6 +210,9 @@ pub enum Effect {
         win_e: bool,
         open_hotkey: Option<fx_commands::HotKey>,
     },
+    /// folder devient (ou cesse d'être) le gestionnaire de fichiers par défaut
+    /// (cf. `fx_win::default_fm`) ; activé, réinscrit aussi au démarrage (exécutable déplacé).
+    DefaultFileManager(bool),
     /// Au démarrage, Windows + E pris par folder : relance le processus résident s'il ne
     /// tourne plus (arrêté, ou exécutable remplacé par une mise à jour).
     EnsureWinE,

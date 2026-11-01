@@ -670,6 +670,12 @@ pub trait Action: Send + Sync {
 
 Clé d'étiquette : `(numéro de série du volume, FileId NTFS)` + chemin de secours, pour
 survivre aux renommages/déplacements sur le même volume (Files stocke `FileFRN`, observé).
+Éléments supprimés : leurs étiquettes sont oubliées (mémoire et base) pour que les compteurs
+restent justes. `Effect::CheckTagged` vérifie hors du thread UI les chemins étiquetés au
+démarrage, à l'ouverture d'une étiquette et sous les éléments touchés par chaque opération ;
+seul « introuvable » sur un lecteur présent compte (clé débranchée, partage hors ligne ou
+accès refusé : étiquettes gardées). Un élément restauré depuis la corbeille revient sans
+ses étiquettes.
 
 ### 7.9 Aperçus (`fx-preview`)
 
@@ -756,15 +762,17 @@ suggestions de nettoyage dès la première version.
 - **Emplacement** `Location::DiskUsage { root, dir }` : l'analyse de `root`, regardée dans
   `dir`. Ouvrir un dossier, remonter, le fil d'Ariane ou un chemin saisi restent dans
   l'analyse tant qu'on est sous `root` (`update::disk::redirect`, sur toute navigation qui
-  ajoute à l'historique) ; « Fermer l'analyse » ouvre `dir` normalement. Non restauré avec
+  ajoute à l'historique) ; « Fermer l'analyse » ferme son onglet (son volet seulement
+  s'il partage un double volet). Non restauré avec
   la session. Points d'entrée : commande « Analyser l'espace » (`Ctrl+Maj+A` : dossier
   sélectionné, sinon dossier affiché, sinon lecteur système), menus contextuels d'un dossier
   et du fond, lecteurs de la barre latérale et de l'accueil, et le bouton de la barre de
   navigation (à côté de la palette, commande « Analyser des lecteurs… »,
   `fx-ui::view::diskpicker`) : menu de cases à cocher des lecteurs (jauge, place libre,
   « déjà analysé » ; lecteur système coché à la première ouverture) et du dossier affiché.
-  Plusieurs lecteurs : le premier dans le volet actif, chacun des autres dans un nouvel
-  onglet, analyses en parallèle (`Msg::AnalyzeDrives`).
+  L'analyse s'ouvre toujours dans un nouvel onglet (à la fin), sans remplacer aucun volet
+  (double volet compris). Plusieurs lecteurs : un nouvel onglet chacun, celui du premier
+  affiché, analyses en parallèle (`Msg::AnalyzeDrives`).
 - **Taille sur disque** : `AllocationSize` de `GetFileInformationByHandleEx(FileFullDirectoryInfo)`
   (`fx_win::dir::for_each_sized_entry`, tampon de 64 Ko par thread). Un fichier cloud non
   téléchargé compte 0, un fichier compressé sa taille compressée : c'est ce qu'on libère.
@@ -1081,6 +1089,21 @@ télémétrie distante.
   posée sur le raccourci « folder » du menu Démarrer de l'utilisateur, créé et marqué au
   besoin, supprimé quand la touche est retirée. Le désinstalleur lance
   `folder.exe --restore-explorer`, qui défait les deux.
+- **Gestionnaire de fichiers par défaut** (même page, réglage `default_file_manager`,
+  `fx_win::default_fm`) : action par défaut `openinfolder` des classes `Directory` et `Drive`
+  dans `HKCU\Software\Classes` (sans droits d'administrateur), commande
+  `"folder.exe" --open-folder "%1"`. La classe `Folder` n'est pas touchée : dossiers virtuels
+  (Ce PC, Panneau de configuration, Corbeille) laissés à l'Explorateur. Une action par défaut
+  posée avant par une autre application est retenue (`folderPrevious`) et remise en place à la
+  désactivation ; `SHChangeNotify(SHCNE_ASSOCCHANGED)` fait relire les associations. Activé :
+  réinscrit à chaque démarrage (exécutable déplacé). `--open-folder` est un processus
+  éphémère : fenêtre folder visible la plus haute dans l'ordre d'affichage (donc la dernière
+  activée, même exécutable, `fx_win::window::last_active_for_exe`) ; il lui cède le premier
+  plan et lui envoie `Remote::OpenFolder` par `WM_COPYDATA` (nouvel onglet, fenêtre ramenée
+  devant), sinon il devient une nouvelle fenêtre sur ce dossier. Limite : « Afficher dans le
+  dossier » des navigateurs passe par `SHOpenFolderAndSelectItems`, qui ouvre le dossier sans
+  transmettre l'élément à sélectionner. Un double-clic sur un dossier du Bureau ou d'une
+  fenêtre de l'Explorateur ouvre aussi folder. `--restore-explorer` retire aussi ces clés.
 - **Mises à jour** (§7.12) : vérification quotidienne sur les releases GitHub dans un
   processus éphémère, téléchargement et vérification de l'installeur, bouton « Mettre à
   jour » dans la barre de titre, installation silencieuse puis relance avec la session ;

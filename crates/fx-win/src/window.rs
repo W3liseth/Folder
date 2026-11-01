@@ -487,11 +487,22 @@ pub fn set_cloaked(hwnd: isize, cloaked: bool) {
 /// Une fenêtre de premier niveau titrée `title` appartient-elle à un processus lancé depuis
 /// `exe` ? (Le titre seul ne suffit pas : l'Explorateur titre ses fenêtres du nom du dossier.)
 pub fn exists_for_exe(title: &str, exe: &std::path::Path) -> bool {
+    find_for_exe(title, exe, false).is_some()
+}
+
+/// Fenêtre visible titrée `title` d'un processus lancé depuis `exe`, la plus haute dans
+/// l'ordre d'affichage (donc la dernière activée), avec l'identifiant de son processus.
+pub fn last_active_for_exe(title: &str, exe: &std::path::Path) -> Option<(isize, u32)> {
+    find_for_exe(title, exe, true).map(|(h, pid)| (h.0 as isize, pid))
+}
+
+fn find_for_exe(title: &str, exe: &std::path::Path, visible_only: bool) -> Option<(HWND, u32)> {
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
     let mut find = ExeFind {
         title: title.encode_utf16().collect(),
         exe: exe.as_os_str().to_ascii_lowercase(),
-        found: false,
+        visible_only,
+        found: None,
     };
     // SAFETY: le rappel ne vit que pendant l'appel et n'accède à `find` que via LPARAM.
     unsafe {
@@ -503,14 +514,23 @@ pub fn exists_for_exe(title: &str, exe: &std::path::Path) -> bool {
 struct ExeFind {
     title: Vec<u16>,
     exe: std::ffi::OsString,
-    found: bool,
+    visible_only: bool,
+    found: Option<(HWND, u32)>,
 }
 
+/// `EnumWindows` parcourt les fenêtres de haut en bas : la première trouvée est la plus
+/// récemment activée.
 unsafe extern "system" fn exe_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-    // SAFETY: LPARAM pointe vers la `ExeFind` de `exists_for_exe`, vivante pendant l'énumération.
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible};
+    // SAFETY: LPARAM pointe vers la `ExeFind` de `find_for_exe`, vivante pendant l'énumération.
     let find = unsafe { &mut *(lparam.0 as *mut ExeFind) };
     if text_of(hwnd, false) != find.title {
+        return true.into();
+    }
+    // Une fenêtre réduite reste visible au sens de Windows ; une fenêtre encore cachée
+    // (démarrage) ou fondue dans une autre ne l'est pas.
+    // SAFETY: HWND fourni par le système.
+    if find.visible_only && !unsafe { IsWindowVisible(hwnd) }.as_bool() {
         return true.into();
     }
     let mut pid = 0u32;
@@ -519,7 +539,7 @@ unsafe extern "system" fn exe_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let same = crate::process::image_path(pid)
         .is_some_and(|p| p.as_os_str().to_ascii_lowercase() == find.exe);
     if same {
-        find.found = true;
+        find.found = Some((hwnd, pid));
         return false.into();
     }
     true.into()

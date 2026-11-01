@@ -125,7 +125,18 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
 
 /// Ligne de réglage façon Windows 11 : titre, description, contrôle à droite.
 fn setting(ui: &mut Ui, f: &Fx<'_>, title: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
-    let pal = f.pal;
+    setting_row(ui, &f.pal, title, desc, control);
+}
+
+/// Ligne d'un réglage : titre et description à gauche, contrôle à droite.
+fn setting_row(
+    ui: &mut Ui,
+    pal: &crate::theme::Palette,
+    title: &str,
+    desc: &str,
+    control: impl FnOnce(&mut Ui),
+) -> (egui::Rect, egui::Rect) {
+    let mut rects = (egui::Rect::NOTHING, egui::Rect::NOTHING);
     Frame::new()
         .fill(pal.layer)
         .stroke(egui::Stroke::new(1.0, pal.stroke))
@@ -133,17 +144,39 @@ fn setting(ui: &mut Ui, f: &Fx<'_>, title: &str, desc: &str, control: impl FnOnc
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // Le texte s'enroule dans la place que laisse le contrôle (à droite) : largeur du
+            // contrôle mesurée à l'image précédente, sinon une longue description passe dessous.
+            let id = ui.scope_id().with(("setting-control", title));
+            let reserve = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(160.0);
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(title);
-                    if !desc.is_empty() {
-                        ui.label(RichText::new(desc).size(12.0).color(pal.text2));
-                    }
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), control);
+                let text_w = (ui.available_width() - reserve - 16.0).max(120.0);
+                let text = ui.allocate_ui_with_layout(
+                    vec2(text_w, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(text_w);
+                        ui.label(title);
+                        if !desc.is_empty() {
+                            ui.label(RichText::new(desc).size(12.0).color(pal.text2));
+                        }
+                    },
+                );
+                let h = text.response.rect.height();
+                let ctl = ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), h),
+                    Layout::right_to_left(Align::Center),
+                    control,
+                );
+                rects = (text.response.rect, ctl.response.rect);
+                let used = ctl.response.rect.width();
+                if (used - reserve).abs() > 0.5 {
+                    ui.data_mut(|d| d.insert_temp(id, used));
+                    ui.ctx().request_discard("largeur du contrôle d'un réglage");
+                }
             });
         });
     ui.add_space(4.0);
+    rects
 }
 
 fn toggle(ui: &mut Ui, on: &mut bool) {
@@ -592,6 +625,15 @@ fn system_shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
         "Override le raccourci Windows + E pour ouvrir folder au lieu de l'Explorateur Windows.",
         |ui| toggle(ui, &mut s.win_e_opens_folder),
     );
+    setting(
+        ui,
+        f,
+        "Ouvrir les dossiers dans folder",
+        "Les dossiers ouverts depuis les autres applications (navigateur, Bureau, raccourcis) \
+         s'ouvrent dans un nouvel onglet de la dernière fenêtre folder au lieu de \
+         l'Explorateur Windows. Désactivé, l'Explorateur redevient l'application par défaut.",
+        |ui| toggle(ui, &mut s.default_file_manager),
+    );
     // Capture de la combinaison : Windows n'accepte qu'une lettre, un chiffre ou F1–F12 avec
     // au moins deux modificateurs.
     if f.vs.capture_open_hotkey {
@@ -886,4 +928,47 @@ fn about(ui: &mut Ui, f: &mut Fx<'_>) {
     );
     ui.add_space(10.0);
     ui.label(RichText::new("Interface inspirée de Files (Files Community) et de l'Explorateur de Windows 11. Rasterisation CPU dérivée de egui_software_backend (MIT/Apache-2.0).").size(12.0).color(pal.text3));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Une longue description s'enroule à gauche du contrôle au lieu de passer dessous.
+    #[test]
+    fn long_description_stays_clear_of_the_control() {
+        let ctx = egui::Context::default();
+        let pal = crate::theme::Palette::new(true, Color32::from_rgb(0, 120, 212));
+        let desc = "Les dossiers ouverts depuis les autres applications (navigateur, Bureau, \
+                    raccourcis) s'ouvrent dans un nouvel onglet de la dernière fenêtre folder \
+                    au lieu de l'Explorateur Windows.";
+        let mut rects = (egui::Rect::NOTHING, egui::Rect::NOTHING);
+        // Plusieurs images : la première mesure la largeur du contrôle.
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        vec2(560.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut on = false;
+                    rects = setting_row(ui, &pal, "Ouvrir les dossiers dans folder", desc, |ui| {
+                        toggle(ui, &mut on);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+        }
+        let (text, control) = rects;
+        assert!(
+            (40.0..60.0).contains(&control.width()),
+            "contrôle : {control:?}"
+        );
+        // Le texte s'enroule sur plusieurs lignes et s'arrête avant le contrôle.
+        assert!(text.right() < control.left(), "{text:?} / {control:?}");
+        assert!(text.height() > 40.0, "description non enroulée : {text:?}");
+    }
 }

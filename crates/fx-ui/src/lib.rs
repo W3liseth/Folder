@@ -99,13 +99,39 @@ pub type Error = Box<dyn std::error::Error>;
 pub mod props_window;
 pub mod settings_window;
 
-/// `folder.exe --restore-explorer` (désinstallation) : Windows + E rendu à l'Explorateur et
-/// raccourci clavier d'ouverture retiré (cf. `fx_win::shortcuts`).
+/// `folder.exe --restore-explorer` (désinstallation) : Windows + E et l'ouverture des
+/// dossiers rendus à l'Explorateur, raccourci clavier d'ouverture retiré (cf.
+/// `fx_win::shortcuts`, `fx_win::default_fm`).
 pub fn restore_explorer() {
     let _com = fx_win::com::init_sta();
+    let _ = fx_win::default_fm::set_default(None);
     if let Ok(exe) = std::env::current_exe() {
         fx_win::shortcuts::restore(&exe);
     }
+}
+
+pub use fx_win::default_fm::OPEN_ARG;
+
+/// `folder.exe --open-folder DOSSIER` (lancé par le shell, folder étant le gestionnaire de
+/// fichiers par défaut) : le dossier s'ouvre dans un nouvel onglet de la dernière fenêtre
+/// folder active, ramenée devant. `false` sans fenêtre (ou si elle ne répond pas dans la
+/// seconde) : l'appelant ouvre alors une nouvelle fenêtre sur ce dossier.
+pub fn open_in_last_window(path: &std::path::Path) -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some((hwnd, pid)) = fx_win::window::last_active_for_exe(WINDOW_TITLE, &exe) else {
+        return false;
+    };
+    // Ce processus vient d'être lancé par l'action de l'utilisateur : il peut céder le
+    // premier plan à la fenêtre visée, qui se ramène elle-même devant.
+    fx_win::win_e::allow_foreground(pid);
+    let msg = fx_store::remote::Remote::OpenFolder(path.to_path_buf());
+    if !fx_win::ipc::send(hwnd, &msg.encode()) {
+        return false;
+    }
+    fx_win::window::bring_to_front(hwnd);
+    true
 }
 
 pub use fx_win::shortcuts::WIN_E_ARG;
@@ -464,6 +490,12 @@ impl Core {
             }
             fx_store::remote::Remote::SaveTag(t) => Msg::SaveTag(t),
             fx_store::remote::Remote::InstallUpdate => Msg::InstallUpdate,
+            fx_store::remote::Remote::OpenFolder(path) => {
+                if let Some(h) = self.view.hwnd() {
+                    fx_win::window::bring_to_front(h);
+                }
+                Msg::OpenInNewTab(fx_app::Location::from_path(path))
+            }
             fx_store::remote::Remote::DeleteTag(id) => Msg::DeleteTag(id),
             fx_store::remote::Remote::TabHover { .. }
             | fx_store::remote::Remote::TabHoverEnd

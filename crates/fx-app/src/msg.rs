@@ -233,6 +233,8 @@ pub enum Msg {
         result: Result<(), String>,
     },
     TagSaved(Tag),
+    /// Chemins étiquetés supprimés (sur un lecteur présent) : leurs étiquettes sont oubliées.
+    TaggedMissing(Vec<PathBuf>),
     RecycleBinLoaded {
         pane: PaneId,
         generation: u64,

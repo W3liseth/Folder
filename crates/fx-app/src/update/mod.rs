@@ -378,6 +378,7 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             }
             vec![]
         }
+        Msg::TaggedMissing(paths) => edit::forget_tags(state, paths),
         Msg::RecycleBinLoaded {
             pane,
             generation,

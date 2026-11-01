@@ -256,6 +256,27 @@ impl Tags {
             .collect()
     }
 
+    /// Tous les chemins étiquetés.
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.by_path.values().map(|(p, _)| p.clone()).collect()
+    }
+
+    /// Chemins étiquetés égaux à l'un de `roots` ou situés dessous.
+    pub fn paths_under(&self, roots: &[PathBuf]) -> Vec<PathBuf> {
+        let roots: Vec<String> = roots.iter().map(|r| key(r)).collect();
+        self.by_path
+            .iter()
+            .filter(|(k, _)| {
+                roots.iter().any(|r| {
+                    k.strip_prefix(r.as_str()).is_some_and(|rest| {
+                        rest.is_empty() || rest.starts_with('\\') || r.ends_with('\\')
+                    })
+                })
+            })
+            .map(|(_, (p, _))| p.clone())
+            .collect()
+    }
+
     pub fn count(&self, id: TagId) -> usize {
         self.by_path
             .values()
