@@ -84,6 +84,14 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                 } else {
                     new_button(ui, f);
                 }
+                // Multiview : l'interrupteur du défilement synchronisé suit « Nouveau » (ou
+                // les boutons de la corbeille, qui finissent par un séparateur).
+                if ctx.multi_pane {
+                    if !ctx.in_recycle_bin {
+                        widgets::vsep(ui, &pal);
+                    }
+                    sync_scroll_switch(ui, f);
+                }
                 // Corbeille : ses propres boutons remplacent le premier groupe ; pas
                 // d'étiquettes sur des éléments supprimés.
                 let tags = f.state.settings.show_tags && !ctx.in_recycle_bin;
@@ -103,7 +111,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     .iter()
                     .map(|g| g.iter().map(|&t| tool_width(ui, t)).collect())
                     .collect();
-                let right_w = button_width(ui, "Aperçu") + button_width(ui, "Double volet") + 16.0;
+                let right_w = button_width(ui, "Aperçu") + button_width(ui, "Multiview") + 16.0;
                 let shown = fit(&widths, ui.available_width() - right_w);
 
                 let mut overflow: Vec<&[Tool]> = Vec::new();
@@ -142,64 +150,99 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                     if r.clicked() {
                         f.cmd(CommandId::TogglePreview);
                     }
-                    let dual = f.state.tab().is_dual();
+                    let multi = f.state.tab().is_multi();
                     let r = widgets::tool_button(
                         ui,
                         &pal,
-                        glyph::DUAL,
-                        dual.then_some(pal.accent),
-                        "Double volet",
+                        glyph::MULTI,
+                        multi.then_some(pal.accent),
+                        "Multiview",
                         true,
                     )
                     .on_hover_text(format!(
-                        "Double volet ({})",
-                        f.shortcut(CommandId::ToggleDualPane)
+                        "Multiview : plusieurs volets côte à côte ({})",
+                        f.shortcut(CommandId::AddPane)
                     ));
-                    Popup::menu(&r).show(|ui| dual_menu(ui, f));
+                    Popup::menu(&r).show(|ui| multiview_menu(ui, f));
                 });
             });
         });
 }
 
-/// Menu du bouton « Double volet ». Volet unique : le second volet s'ouvre sur le dossier en
-/// cours, ou accueille un autre onglet (à un seul volet) qui quitte alors la barre. Double
-/// volet : fermer l'un des deux, ou les séparer en deux onglets.
-fn dual_menu(ui: &mut Ui, f: &mut Fx<'_>) {
+/// Interrupteur du défilement synchronisé (onglet en multiview).
+fn sync_scroll_switch(ui: &mut Ui, f: &mut Fx<'_>) {
+    let pal = f.pal;
+    let on = f.state.tab().sync_scroll;
+    let r = widgets::switch_button(ui, &pal, "Défilement synchronisé", on);
+    let tip = if on {
+        "Les volets défilent ensemble"
+    } else {
+        "Faire défiler tous les volets ensemble"
+    };
+    let shortcut = f.shortcut(CommandId::ToggleSyncScroll);
+    let r = if shortcut.is_empty() {
+        r.on_hover_text(tip)
+    } else {
+        r.on_hover_text(format!("{tip} ({shortcut})"))
+    };
+    if r.clicked() {
+        f.cmd(CommandId::ToggleSyncScroll);
+    }
+}
+
+/// Menu du bouton « Multiview ». Toujours : ajouter un volet sur le dossier en cours, ou y
+/// intégrer un autre onglet (tous ses volets), qui quitte alors la barre. En multiview, en
+/// plus : fermer l'un des volets, ou les séparer en onglets.
+fn multiview_menu(ui: &mut Ui, f: &mut Fx<'_>) {
     widgets::menu_appear(ui);
     ui.set_min_width(280.0);
     let pal = f.pal;
-    if f.state.tab().is_dual() {
-        menu_cmd(ui, f, CommandId::CloseLeftPane, "");
-        menu_cmd(ui, f, CommandId::CloseRightPane, "");
-        ui.separator();
-        menu_cmd(ui, f, CommandId::SeparatePanes, "");
-        return;
-    }
-    let here = egui::Button::new(widgets::menu_entry(
-        glyph::DUAL,
-        "Ouvrir le dossier en cours",
-        &pal,
-    ))
-    .shortcut_text(f.shortcut(CommandId::ToggleDualPane));
-    if ui.add(here).clicked() {
-        f.cmd(CommandId::ToggleDualPane);
-        ui.close();
-    }
+    let state = f.state;
+    let tab = state.tab();
+    let room = fx_commands::MAX_PANES - tab.panes.len();
+    menu_cmd(
+        ui,
+        f,
+        CommandId::AddPane,
+        "Ajouter un volet : dossier en cours",
+    );
     ui.separator();
     ui.label(egui::RichText::new("Intégrer un onglet").color(pal.text2));
-    let state = f.state;
     let mut any = false;
-    for (i, tab) in state.tabs.iter().enumerate() {
-        if i == state.active_tab || tab.is_dual() {
+    for (i, other) in state.tabs.iter().enumerate() {
+        if i == state.active_tab {
             continue;
         }
         any = true;
-        let loc = tab.active_pane().location();
-        let entry = widgets::menu_entry(super::titlebar::location_glyph(loc), &tab.title(), &pal);
-        let mut r = ui.button(entry);
-        if let fx_app::Location::Dir(p) = loc {
-            r = r.on_hover_text(p.display().to_string());
-        }
+        let loc = other.active_pane().location();
+        let g = if other.is_multi() {
+            glyph::MULTI
+        } else {
+            super::titlebar::location_glyph(loc)
+        };
+        let fits = other.panes.len() <= room;
+        let r = ui.add_enabled(
+            fits,
+            egui::Button::new(widgets::menu_entry(g, &other.title(), &pal)),
+        );
+        let paths: Vec<String> = other
+            .panes
+            .iter()
+            .filter_map(|p| match p.location() {
+                fx_app::Location::Dir(d) => Some(d.display().to_string()),
+                _ => None,
+            })
+            .collect();
+        let r = if !fits {
+            r.on_disabled_hover_text(format!(
+                "{} volets au plus par onglet",
+                fx_commands::MAX_PANES
+            ))
+        } else if paths.is_empty() {
+            r
+        } else {
+            r.on_hover_text(paths.join("\n"))
+        };
         if r.clicked() {
             f.send(Msg::MergeTabIntoPane(i));
             ui.close();
@@ -211,6 +254,27 @@ fn dual_menu(ui: &mut Ui, f: &mut Fx<'_>) {
             egui::Button::new(widgets::menu_entry("", "Aucun autre onglet ouvert", &pal)),
         );
     }
+    if !tab.is_multi() {
+        return;
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Volets").color(pal.text2));
+    for (i, p) in tab.panes.iter().enumerate() {
+        let label = if i == tab.active {
+            format!("Fermer « {} » (actif)", p.location().title())
+        } else {
+            format!("Fermer « {} »", p.location().title())
+        };
+        if ui
+            .button(widgets::menu_entry(glyph::CLOSE, &label, &pal))
+            .clicked()
+        {
+            f.send(Msg::ClosePane(p.id));
+            ui.close();
+        }
+    }
+    ui.separator();
+    menu_cmd(ui, f, CommandId::SeparatePanes, "");
 }
 
 /// « Nouveau » : dossier ou document texte.

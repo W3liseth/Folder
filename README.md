@@ -10,7 +10,7 @@
 
 ---
 
-folder reprend les fonctions d'un gestionnaire de fichiers moderne : onglets, double volet, aperçus, étiquettes, palette de
+folder reprend les fonctions d'un gestionnaire de fichiers moderne : onglets, multiview (plusieurs volets), aperçus, étiquettes, palette de
 commandes. Il s'intègre à l'Explorateur Windows et tient dans un seul exécutable natif, sans
 WebView ni runtime .NET.
 
@@ -22,7 +22,7 @@ WebView ni runtime .NET.
   restaurée au démarrage.
 - **Vues** : Détails, Liste, Grille avec miniatures et Colonnes. Le tri est naturel, comme
   celui de l'Explorateur, et la vue est mémorisée pour chaque dossier. On peut ouvrir un
-  double volet et un volet d'aperçu (texte et code colorés, Markdown, images).
+  multiview (jusqu'à six volets, défilement synchronisé) et un volet d'aperçu (texte et code colorés, Markdown, images).
 - **Opérations** : copier, couper, coller, déplacer vers la corbeille, renommer (aussi en
   masse), annuler et rétablir, compresser ou extraire une archive zip. Elles passent par
   `IFileOperation`, avec une progression et une annulation possibles.

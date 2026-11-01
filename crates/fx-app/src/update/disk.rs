@@ -56,7 +56,7 @@ pub fn scan_of<'a>(state: &'a AppState, root: &Path) -> Option<&'a DiskScan> {
 }
 
 /// Ouvre l'analyse de `path` dans un nouvel onglet (à la fin, activé) : elle ne remplace
-/// jamais un volet existant, dont le double volet de l'onglet courant.
+/// jamais un volet existant, dont ceux du multiview de l'onglet courant.
 fn open_tab(state: &mut AppState, path: PathBuf) -> Vec<Effect> {
     let root =
         covering(state, &path).map_or_else(|| path.clone(), |i| state.disk_scans[i].root.clone());
@@ -242,7 +242,7 @@ pub fn cancel(state: &mut AppState, root: &Path) -> Vec<Effect> {
 }
 
 /// « Fermer l'analyse » : ferme son onglet (son volet seulement s'il partage l'onglet en
-/// double volet). L'analyse elle-même reste en mémoire pour y revenir.
+/// multiview). L'analyse elle-même reste en mémoire pour y revenir.
 pub fn close(state: &mut AppState, pane: PaneId) -> Vec<Effect> {
     let Some((tab, index)) = state.tabs.iter().enumerate().find_map(|(t, tab)| {
         let at = tab.panes.iter().position(|p| p.id == pane)?;

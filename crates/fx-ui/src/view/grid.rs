@@ -29,10 +29,13 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     let rows = n.div_ceil(per_row);
 
     let sc = f.vs.scroll.entry(pane.id).or_default();
-    if sc.shown.as_ref() != Some(pane.location()) {
+    let before = sc.offset;
+    let reset = sc.shown.as_ref() != Some(pane.location());
+    if reset {
         sc.shown = Some(pane.location().clone());
         sc.request = Some(0.0);
     }
+    let keyboard = sc.ensure.is_some();
     if let Some(pos) = sc.ensure.take() {
         let top = (pos / per_row) as f32 * th;
         if top < sc.offset {
@@ -41,6 +44,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
             sc.request = Some(top + th - sc.view_h);
         }
     }
+    let followed = super::pane::take_follow(sc, reset);
     let mut area = ScrollArea::vertical()
         .id_salt(("grid", pane.id.0))
         .auto_shrink([false, false]);
@@ -235,4 +239,8 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     sc.offset = out.state.clamped_offset().y;
     sc.view_h = out.inner_rect.height();
     sc.width = out.inner_rect.width();
+    let delta = sc.offset - before;
+    if !reset && !followed {
+        super::pane::sync_scroll(ui, f, pane.id, delta, keyboard);
+    }
 }

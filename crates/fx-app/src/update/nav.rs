@@ -74,13 +74,15 @@ fn restore_session(state: &mut AppState, sess: &Session) -> Vec<Effect> {
         let mut tab = state.new_tab(loc.clone());
         tab.panes[0].layout = t.left.layout;
         tab.panes[0].history = History::restored(loc, &t.left.back, &t.left.forward);
-        if let Some(r) = &t.right {
+        let others = t.right.iter().chain(&t.more);
+        for r in others.take(fx_commands::MAX_PANES - 1) {
             let loc = r.path.clone().map_or(Location::Home, Location::from_path);
             let mut p = state.new_pane(loc.clone());
             p.layout = r.layout;
             p.history = History::restored(loc, &r.back, &r.forward);
             tab.panes.push(p);
         }
+        tab.sync_scroll = t.sync_scroll && tab.is_multi();
         state.tabs.push(tab);
     }
     state.active_tab = sess.active.min(state.tabs.len() - 1);
@@ -367,15 +369,37 @@ fn remove_tab(state: &mut AppState, i: usize) -> (crate::state::Tab, Vec<Effect>
     (tab, fx)
 }
 
-/// Ferme le volet `index` (0 : gauche, 1 : droite) de l'onglet actif en double volet ;
-/// l'autre reste seul et prend le focus.
+/// Multiview : nouveau volet à droite des autres, sur le dossier du volet actif, qui prend le
+/// focus. Sans effet au-delà de [`fx_commands::MAX_PANES`].
+pub fn add_pane(state: &mut AppState) -> Vec<Effect> {
+    if !state.tab().has_room(1) {
+        return vec![];
+    }
+    let loc = state.pane().location().clone();
+    let pane = state.new_pane(Location::Home);
+    let id = pane.id;
+    let tab = state.tab_mut();
+    tab.panes.push(pane);
+    tab.active = tab.panes.len() - 1;
+    load(state, id, loc, false)
+}
+
+/// Ferme le volet `index` de l'onglet actif en multiview. Le focus passe au volet voisin
+/// (celui de gauche, ou le nouveau premier) s'il était sur le volet fermé ; il reste sinon
+/// sur le même volet. Seul, le dernier volet perd le défilement synchronisé.
 pub fn close_pane(state: &mut AppState, index: usize) -> Vec<Effect> {
     let tab = state.tab_mut();
     if tab.panes.len() < 2 || index >= tab.panes.len() {
         return vec![];
     }
     let removed = tab.panes.remove(index);
-    tab.active = 0;
+    if tab.active > index || (tab.active == index && index > 0) {
+        tab.active -= 1;
+    }
+    tab.active = tab.active.min(tab.panes.len() - 1);
+    if !tab.is_multi() {
+        tab.sync_scroll = false;
+    }
     if let Some(c) = &removed.cancel {
         c.cancel();
     }
@@ -385,45 +409,50 @@ pub fn close_pane(state: &mut AppState, index: usize) -> Vec<Effect> {
     fx
 }
 
-/// Défait le double volet sans rien fermer : le volet de droite part dans un nouvel onglet,
-/// juste après, avec son contenu et son historique (rien à recharger). L'onglet qui garde le
-/// volet actif reste affiché.
+/// Défait le multiview sans rien fermer : chaque volet après le premier part dans son propre
+/// onglet, juste après et dans l'ordre, avec son contenu et son historique (rien à
+/// recharger). L'onglet qui garde le volet actif reste affiché.
 pub fn separate_panes(state: &mut AppState) -> Vec<Effect> {
-    if !state.tab().is_dual() {
+    if !state.tab().is_multi() {
         return vec![];
     }
-    let id = state.next_id();
+    let ids: Vec<u64> = (1..state.tab().panes.len())
+        .map(|_| state.next_id())
+        .collect();
+    let current = state.active_tab.min(state.tabs.len() - 1);
     let tab = state.tab_mut();
-    let right_active = tab.active == 1;
-    let pane = tab.panes.remove(1);
+    let active = tab.active.min(tab.panes.len() - 1);
+    let rest: Vec<_> = tab.panes.drain(1..).collect();
     tab.active = 0;
-    let at = state.active_tab.min(state.tabs.len() - 1) + 1;
-    state.tabs.insert(
-        at,
-        crate::state::Tab {
-            id,
-            panes: vec![pane],
-            active: 0,
-        },
-    );
-    if right_active {
-        state.active_tab = at;
+    tab.sync_scroll = false;
+    for (k, (pane, id)) in rest.into_iter().zip(ids).enumerate() {
+        state.tabs.insert(
+            current + 1 + k,
+            crate::state::Tab {
+                id,
+                panes: vec![pane],
+                active: 0,
+                sync_scroll: false,
+            },
+        );
     }
+    state.active_tab = current + active;
     after_selection(state)
 }
 
-/// Intègre l'onglet `i` comme volet de droite de l'onglet actif : le volet passe tel quel
-/// (contenu, sélection, historique, surveillance), sans rechargement.
+/// Intègre l'onglet `i` à l'onglet actif : ses volets s'ajoutent à droite, tels quels
+/// (contenu, sélection, historique, surveillance), sans rechargement ; le premier prend le
+/// focus. Refusé s'il en résulterait plus de [`fx_commands::MAX_PANES`] volets.
 pub fn merge_tab_into_pane(state: &mut AppState, i: usize) -> Vec<Effect> {
     let current = state.active_tab.min(state.tabs.len() - 1);
-    if i >= state.tabs.len() || i == current || state.tab().is_dual() || state.tabs[i].is_dual() {
+    if i >= state.tabs.len() || i == current || !state.tab().has_room(state.tabs[i].panes.len()) {
         return vec![];
     }
-    let mut merged = state.tabs.remove(i);
+    let merged = state.tabs.remove(i);
     state.active_tab = if i < current { current - 1 } else { current };
     let tab = state.tab_mut();
-    tab.panes.push(merged.panes.remove(0));
-    tab.active = 1;
+    tab.active = tab.panes.len();
+    tab.panes.extend(merged.panes);
     state.renaming = None;
     after_selection(state)
 }

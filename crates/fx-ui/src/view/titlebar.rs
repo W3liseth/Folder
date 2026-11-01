@@ -277,8 +277,8 @@ fn tabs(ui: &mut Ui, f: &mut Fx<'_>, area: Rect) -> f32 {
         }
 
         let loc = tab.active_pane().location();
-        if tab.is_dual() {
-            dual_tab_face(ui, f, rect, tab, active);
+        if tab.is_multi() {
+            multi_tab_face(ui, f, rect, tab, active);
         } else {
             tab_face(ui, f, rect, loc, &tab.title(), active);
         }
@@ -361,13 +361,11 @@ fn tabs(ui: &mut Ui, f: &mut Fx<'_>, area: Rect) -> f32 {
             }
         });
         if drag.is_none() {
-            resp.on_hover_text(match tab.panes.as_slice() {
-                [a, b, ..] => format!(
-                    "Gauche : {}\nDroite : {}",
-                    full_name(a.location()),
-                    full_name(b.location())
-                ),
-                _ => full_name(tab.active_pane().location()),
+            // Multiview : un chemin par ligne, de gauche à droite.
+            resp.on_hover_ui(|ui| {
+                let names: Vec<String> =
+                    tab.panes.iter().map(|p| full_name(p.location())).collect();
+                ui.label(names.join("\n"));
             });
         }
     }
@@ -500,7 +498,7 @@ fn full_name(loc: &Location) -> String {
     }
 }
 
-/// Glyphe d'un emplacement (onglets, menu du double volet).
+/// Glyphe d'un emplacement (onglets, menu du multiview).
 pub(crate) fn location_glyph(loc: &Location) -> &'static str {
     match loc {
         Location::Home => glyph::HOME,
@@ -522,16 +520,17 @@ fn title_rect(rect: Rect) -> Rect {
     )
 }
 
-/// Onglet en double volet : icône « double volet » et les noms des deux dossiers, séparés
-/// d'un trait. Faute de place, chacun garde au moins la moitié de la largeur (les deux
-/// restent lisibles) ; le nom du volet actif ressort quand l'onglet est actif.
-fn dual_tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, tab: &fx_app::Tab, active: bool) {
+/// Onglet en multiview : icône « multiview » et les noms des dossiers de chaque volet,
+/// séparés d'un trait. Faute de place, la largeur est partagée équitablement : un nom court
+/// garde toute la sienne et laisse le reste aux autres (cf. [`shares`]) ; le nom du volet
+/// actif ressort quand l'onglet est actif.
+fn multi_tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, tab: &fx_app::Tab, active: bool) {
     const PAD: f32 = 6.0;
     let pal = f.pal;
     ui.painter().text(
         pos2(rect.left() + 18.0, rect.center().y),
         Align2::CENTER_CENTER,
-        glyph::DUAL,
+        glyph::MULTI,
         icon_font(14.0),
         if active { pal.accent } else { pal.text2 },
     );
@@ -540,55 +539,62 @@ fn dual_tab_face(ui: &mut Ui, f: &mut Fx<'_>, rect: Rect, tab: &fx_app::Tab, act
     } else {
         FontId::proportional(13.0)
     };
-    let names = [
-        tab.panes[0].location().title(),
-        tab.panes[1].location().title(),
-    ];
-    let galleys = names.map(|n| {
-        f.vs.fallbacks.scan(&n);
-        ui.painter()
-            .layout_no_wrap(n, font.clone(), Color32::PLACEHOLDER)
-    });
-    // Couleur du volet actif : par position (deux dossiers de même nom restent distingués).
-    let colors = [0, 1].map(|i| {
-        if active && i == tab.active {
+    let galleys: Vec<_> = tab
+        .panes
+        .iter()
+        .map(|p| {
+            let n = p.location().title();
+            f.vs.fallbacks.scan(&n);
+            ui.painter()
+                .layout_no_wrap(n, font.clone(), Color32::PLACEHOLDER)
+        })
+        .collect();
+    let text = title_rect(rect);
+    let gaps = (galleys.len() - 1) as f32 * (2.0 * PAD + 1.0);
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x).collect();
+    let shown = shares(&widths, (text.width() - gaps).max(0.0));
+    let y = rect.center().y;
+    let mut x = text.left();
+    for (i, (g, w)) in galleys.into_iter().zip(shown).enumerate() {
+        if i > 0 {
+            let sep_x = x + PAD + 0.5;
+            ui.painter().vline(
+                sep_x,
+                rect.y_range().shrink(11.0),
+                egui::Stroke::new(1.0, pal.stroke_strong),
+            );
+            x = sep_x + 0.5 + PAD;
+        }
+        // Couleur du volet actif : par position (deux dossiers de même nom restent distingués).
+        let color = if active && i == tab.active {
             pal.text
         } else {
             pal.text2
-        }
-    });
-    let text = title_rect(rect);
-    let avail = (text.width() - 2.0 * PAD - 1.0).max(0.0);
-    let (wa, wb) = (galleys[0].size().x, galleys[1].size().x);
-    let half = avail / 2.0;
-    let (da, db) = if wa + wb <= avail {
-        (wa, wb)
-    } else if wa < half {
-        (wa, avail - wa)
-    } else if wb < half {
-        (avail - wb, wb)
-    } else {
-        (half, half)
-    };
-    let y = rect.center().y;
-    let a = Rect::from_min_max(
-        pos2(text.left(), text.top()),
-        pos2(text.left() + da, text.bottom()),
-    );
-    let sep_x = a.right() + PAD + 0.5;
-    let b = Rect::from_min_max(
-        pos2(sep_x + 0.5 + PAD, text.top()),
-        pos2(sep_x + 0.5 + PAD + db, text.bottom()),
-    );
-    for ((g, clip), color) in galleys.into_iter().zip([a, b]).zip(colors) {
+        };
+        let clip = Rect::from_min_max(pos2(x, text.top()), pos2(x + w, text.bottom()));
         let pos = pos2(clip.left(), y - g.size().y / 2.0);
         ui.painter().with_clip_rect(clip).galley(pos, g, color);
+        x += w;
     }
-    ui.painter().vline(
-        sep_x,
-        rect.y_range().shrink(11.0),
-        egui::Stroke::new(1.0, pal.stroke_strong),
-    );
+}
+
+/// Largeurs affichées de noms de largeurs `widths` dans `avail` : toutes entières si elles
+/// tiennent ; sinon partage équitable, où un nom plus court que sa part garde sa largeur et
+/// rend le surplus aux autres.
+fn shares(widths: &[f32], avail: f32) -> Vec<f32> {
+    if widths.iter().sum::<f32>() <= avail {
+        return widths.to_vec();
+    }
+    let mut order: Vec<usize> = (0..widths.len()).collect();
+    order.sort_by(|&a, &b| widths[a].total_cmp(&widths[b]));
+    let mut out = vec![0.0; widths.len()];
+    let mut left = avail;
+    for (k, &i) in order.iter().enumerate() {
+        let share = left / (widths.len() - k) as f32;
+        out[i] = widths[i].min(share);
+        left -= out[i];
+    }
+    out
 }
 
 /// Icône et titre d'un onglet.
@@ -784,5 +790,21 @@ fn window_buttons(ui: &mut Ui, f: &mut Fx<'_>, full: Rect, maximized: bool) {
                 _ => ctx.send_viewport_cmd(ViewportCommand::Close),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shares;
+
+    #[test]
+    fn names_share_the_tab_width() {
+        // Tout tient : largeurs entières.
+        assert_eq!(shares(&[30.0, 40.0, 20.0], 100.0), [30.0, 40.0, 20.0]);
+        // Un nom court garde sa largeur, les autres se partagent le reste.
+        assert_eq!(shares(&[10.0, 80.0, 80.0], 100.0), [10.0, 45.0, 45.0]);
+        // Tous longs : parts égales (double volet : moitié chacun).
+        assert_eq!(shares(&[90.0, 120.0], 100.0), [50.0, 50.0]);
+        assert_eq!(shares(&[60.0, 60.0, 60.0, 60.0], 100.0), [25.0; 4]);
     }
 }

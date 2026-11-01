@@ -58,9 +58,11 @@ pub enum Msg {
         index: usize,
     },
     FocusPane(PaneId),
-    /// L'onglet `i` (à un seul volet) quitte la barre et devient le volet de droite de
-    /// l'onglet actif (à un seul volet lui aussi), avec son contenu et son historique.
+    /// L'onglet `i` quitte la barre : ses volets s'ajoutent à droite de ceux de l'onglet
+    /// actif (multiview), avec leur contenu et leur historique.
     MergeTabIntoPane(usize),
+    /// Ferme ce volet de l'onglet actif (multiview ; les autres restent).
+    ClosePane(PaneId),
     /// Ouvre un fichier avec son application par défaut (ou navigue si c'est un dossier).
     OpenPath(PathBuf),
     /// Texte validé dans la barre d'adresse (variables d'environnement déjà développées) :

@@ -189,6 +189,25 @@ mod tests {
     }
 
     #[test]
+    fn keybindings_of_renamed_or_removed_commands() {
+        let dir = tmp("renamed");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join("settings.toml"),
+            "show_hidden = true\n[keybindings]\nToggleDualPane = []\nCloseLeftPane = []\n",
+        )
+        .expect("write");
+        let s = load_settings(&Paths::in_dir(&dir));
+        // Le reste des réglages est lu ; l'ancien nom garde ses raccourcis (aucun ici).
+        assert!(s.show_hidden);
+        assert_eq!(
+            s.keybindings.keys().copied().collect::<Vec<_>>(),
+            [fx_commands::CommandId::AddPane]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn corrupt_settings_fall_back_to_defaults() {
         let dir = tmp("corrupt");
         std::fs::create_dir_all(&dir).expect("mkdir");
@@ -214,6 +233,11 @@ mod tests {
                     layout: Layout::Details,
                     ..PaneSession::default()
                 }),
+                more: vec![PaneSession {
+                    path: Some(PathBuf::from(r"E:\photos")),
+                    ..PaneSession::default()
+                }],
+                sync_scroll: true,
             }],
             active: 0,
             placement: Some(WindowPlacement {

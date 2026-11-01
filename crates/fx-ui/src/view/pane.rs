@@ -1,5 +1,5 @@
-//! Volets : cartes arrondies (une ou deux côte à côte), contenu selon l'emplacement et la
-//! disposition.
+//! Volets : cartes arrondies (une, ou plusieurs en multiview), contenu selon l'emplacement et
+//! la disposition ; défilement synchronisé des volets.
 
 use std::time::Instant;
 
@@ -15,18 +15,15 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
     super::disk::prune(f);
     let state: &AppState = f.state;
     let tab = state.tab();
-    let full = ui.available_rect_before_wrap().shrink2(vec2(0.0, 0.0));
+    let full = ui.available_rect_before_wrap();
     let n = tab.panes.len();
-    let gap = 8.0;
-    let w = (full.width() - gap * (n as f32 - 1.0)) / n as f32;
+    // Les cartes d'abord, puis les contenus (chacun découpé à sa carte) : l'ordre des
+    // contenus peut alors changer sans rien changer à l'image.
     for (i, pane) in tab.panes.iter().enumerate() {
-        let rect = Rect::from_min_size(
-            pos2(full.left() + i as f32 * (w + gap), full.top() + 4.0),
-            vec2(w, full.height() - 8.0),
-        );
+        let rect = pane_rect(full, n, i);
         let pal = f.pal;
         // Carte en relief : ombre douce, fond, contour, reflet clair sur l'arête haute et
-        // liseré d'accent (le volet actif en double volet).
+        // liseré d'accent (le volet actif en multiview).
         widgets::glow(
             ui,
             rect.translate(vec2(0.0, 2.0)),
@@ -53,7 +50,7 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
             1.0,
             highlight,
         );
-        // Liseré d'accent : seulement pour distinguer le volet actif en double volet.
+        // Liseré d'accent : seulement pour distinguer le volet actif en multiview.
         if n > 1 && i == tab.active {
             widgets::neon_line(
                 ui,
@@ -76,6 +73,18 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
         {
             f.send(Msg::FocusPane(pane.id));
         }
+    }
+    // Défilement synchronisé : le volet qui mène est dessiné en premier, les autres suivent
+    // son écart dans la même image (sinon ceux dessinés avant lui auraient une image de
+    // retard). Ses barres de défilement s'affichent aussi dans les volets qui suivent.
+    let synced = tab.sync_scroll && n > 1;
+    let lead = synced.then(|| sync_leader(ui, tab, full));
+    let order = lead
+        .into_iter()
+        .chain((0..n).filter(move |&i| Some(i) != lead));
+    for i in order {
+        let pane = &tab.panes[i];
+        let rect = pane_rect(full, n, i);
         // Transition à chaque nouvel emplacement : glissement dans le sens de la navigation
         // (entrer, suivant : depuis la droite ; précédent, parent : depuis la gauche) et fondu.
         let (offset, opacity) = transition(ui, f, pane);
@@ -89,8 +98,122 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
         if opacity < 1.0 {
             child.set_opacity(opacity);
         }
+        if synced {
+            shared_bars(&mut child, f);
+        }
         draw_pane(&mut child, f, pane);
     }
+}
+
+/// Volet qui mène le défilement synchronisé : celui sous le pointeur (molette, barre de
+/// défilement saisie), sinon le volet actif (clavier).
+fn sync_leader(ui: &Ui, tab: &fx_app::Tab, full: Rect) -> usize {
+    let n = tab.panes.len();
+    let at = ui.input(|i| {
+        if i.pointer.any_down() {
+            i.pointer.press_origin()
+        } else {
+            i.pointer.hover_pos()
+        }
+    });
+    at.and_then(|p| (0..n).find(|&i| pane_rect(full, n, i).contains(p)))
+        .unwrap_or(tab.active.min(n - 1))
+}
+
+/// Barres de défilement des volets synchronisés : egui n'affiche une barre flottante que
+/// sous le pointeur (opacité « active ») ; ici, les autres volets prennent la même opacité,
+/// que `wheel` fait apparaître pendant le défilement puis s'effacer. Le style modifié est
+/// gardé tant que celui de la fenêtre ne change pas (pas d'allocation par image).
+fn shared_bars(ui: &mut Ui, f: &mut Fx<'_>) {
+    let base = ui.style();
+    let s = base.spacing.scroll;
+    if s.active_handle_opacity == 0.0 && s.active_background_opacity == 0.0 {
+        return;
+    }
+    let cached =
+        f.vs.shared_bars
+            .as_ref()
+            .filter(|(b, _)| std::sync::Arc::ptr_eq(b, base) || **b == **base)
+            .map(|(_, d)| d.clone());
+    let style = cached.unwrap_or_else(|| {
+        let mut st = (**base).clone();
+        st.spacing.scroll.dormant_handle_opacity = s.active_handle_opacity;
+        st.spacing.scroll.dormant_background_opacity = s.active_background_opacity;
+        let st = std::sync::Arc::new(st);
+        f.vs.shared_bars = Some((base.clone(), st.clone()));
+        st
+    });
+    ui.set_style(style);
+}
+
+/// Défilement synchronisé, côté volet qui suit : l'écart reçu des autres volets devient une
+/// demande de défilement. `reset` (nouvel emplacement, retour en haut) l'abandonne. Vrai si
+/// le volet suit à cette image : il n'entraîne alors personne (pas d'écho).
+pub(crate) fn take_follow(sc: &mut super::Scroll, reset: bool) -> bool {
+    let d = std::mem::take(&mut sc.follow);
+    if d == 0.0 || reset {
+        return false;
+    }
+    sc.request = Some((sc.request.unwrap_or(sc.offset) + d).max(0.0));
+    true
+}
+
+/// Défilement synchronisé, côté volet qui mène : le volet `pane` a défilé de `delta` points
+/// à cette image ; les autres volets de l'onglet (s'il est synchronisé) suivent du même
+/// écart, chacun borné à sa propre liste. Seul compte un défilement voulu dans ce volet :
+/// molette ou barre de défilement sous le pointeur, ou clavier (`keyboard`) ; pas un
+/// ajustement (liste raccourcie, fenêtre redimensionnée). Le volet qui mène est dessiné en
+/// premier (cf. [`sync_leader`]) : les autres suivent dans la même image ; un volet déjà
+/// dessiné (meneur mal deviné) suit à l'image suivante, demandée une fois.
+pub(crate) fn sync_scroll(ui: &Ui, f: &mut Fx<'_>, pane: PaneId, delta: f32, keyboard: bool) {
+    let tab = f.state.tab();
+    if delta.abs() < 0.5 || !tab.sync_scroll || !tab.is_multi() {
+        return;
+    }
+    let area = ui.clip_rect();
+    let pointer = ui.input(|i| {
+        i.pointer.hover_pos().is_some_and(|p| area.contains(p))
+            || (i.pointer.any_down() && i.pointer.press_origin().is_some_and(|p| area.contains(p)))
+    });
+    if !pointer && !keyboard {
+        return;
+    }
+    for p in &tab.panes {
+        // Seules les vues qui défilent verticalement suivent (pas Colonnes, ni l'accueil, ni
+        // un dossier vide) : l'écart ne s'accumule pas en attendant.
+        let scrolls = matches!(p.layout, View::Details | View::List | View::Grid)
+            && p.listing.as_ref().is_some_and(|l| !l.is_empty());
+        if p.id != pane && scrolls {
+            f.vs.scroll.entry(p.id).or_default().follow += delta;
+        }
+    }
+    // Barre saisie : `wheel` ne voit pas ce défilement, les barres des autres volets
+    // doivent pourtant rester affichées.
+    f.vs.wheel.keep_bars(ui.input(|i| i.time));
+    ui.ctx().request_repaint();
+}
+
+/// Carte du volet `i` sur `n` dans `full`. Jusqu'à trois volets côte à côte ; au-delà, deux
+/// rangées (la première prend le volet en plus quand `n` est impair) : chaque volet garde
+/// une largeur utile.
+fn pane_rect(full: Rect, n: usize, i: usize) -> Rect {
+    const GAP: f32 = 8.0;
+    let rows = if n > 3 { 2 } else { 1 };
+    let first = n.div_ceil(rows);
+    let (row, col, per_row) = if i < first {
+        (0, i, first)
+    } else {
+        (1, i - first, n - first)
+    };
+    let h = (full.height() - 8.0 - GAP * (rows as f32 - 1.0)) / rows as f32;
+    let w = (full.width() - GAP * (per_row as f32 - 1.0)) / per_row as f32;
+    Rect::from_min_size(
+        pos2(
+            full.left() + col as f32 * (w + GAP),
+            full.top() + 4.0 + row as f32 * (h + GAP),
+        ),
+        vec2(w, h),
+    )
 }
 
 /// Décalage et opacité du contenu d'un volet pendant la transition (180 ms) qui suit une

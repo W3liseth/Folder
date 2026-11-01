@@ -425,8 +425,7 @@ pub struct AppState {
     pub clipboard: ClipboardState,
 }
 pub struct WindowState { pub tabs: Vec<Tab>, pub active_tab: usize, pub sidebar: SidebarState, /* volets */ }
-pub struct Tab { pub panes: PaneLayout, pub title: CompactString }
-pub enum PaneLayout { Single(Pane), Dual { a: Pane, b: Pane, arrangement: Arrangement, focus: Side } }
+pub struct Tab { pub panes: Vec<Pane>, pub active: usize, pub sync_scroll: bool } // multiview : 1 à MAX_PANES (6) volets
 pub struct Pane {
     pub history: History,            // back/forward bornés (100 entrées)
     pub view: ViewKind,              // Details | List | Grid(size) | Cards | Columns
@@ -763,7 +762,7 @@ suggestions de nettoyage dès la première version.
   `dir`. Ouvrir un dossier, remonter, le fil d'Ariane ou un chemin saisi restent dans
   l'analyse tant qu'on est sous `root` (`update::disk::redirect`, sur toute navigation qui
   ajoute à l'historique) ; « Fermer l'analyse » ferme son onglet (son volet seulement
-  s'il partage un double volet). Non restauré avec
+  s'il partage un onglet en multiview). Non restauré avec
   la session. Points d'entrée : commande « Analyser l'espace » (`Ctrl+Maj+A` : dossier
   sélectionné, sinon dossier affiché, sinon lecteur système), menus contextuels d'un dossier
   et du fond, lecteurs de la barre latérale et de l'accueil, et le bouton de la barre de
@@ -771,7 +770,7 @@ suggestions de nettoyage dès la première version.
   `fx-ui::view::diskpicker`) : menu de cases à cocher des lecteurs (jauge, place libre,
   « déjà analysé » ; lecteur système coché à la première ouverture) et du dossier affiché.
   L'analyse s'ouvre toujours dans un nouvel onglet (à la fin), sans remplacer aucun volet
-  (double volet compris). Plusieurs lecteurs : un nouvel onglet chacun, celui du premier
+  (multiview compris). Plusieurs lecteurs : un nouvel onglet chacun, celui du premier
   affiché, analyses en parallèle (`Msg::AnalyzeDrives`).
 - **Taille sur disque** : `AllocationSize` de `GetFileInformationByHandleEx(FileFullDirectoryInfo)`
   (`fx_win::dir::for_each_sized_entry`, tampon de 64 Ko par thread). Un fichier cloud non
@@ -813,7 +812,7 @@ suggestions de nettoyage dès la première version.
   au moins son en-tête et trois lignes. Pendant un redimensionnement, l'image en place est
   étirée et les tuiles mises à l'échelle ; disposition et image ne sont recalculées
   qu'une fois la taille stable depuis 120 ms. Sous 760 points de large (petite fenêtre,
-  double volet) : résumé sur une seconde ligne, libellés raccourcis, titre tronqué ; la
+  multiview) : résumé sur une seconde ligne, libellés raccourcis, titre tronqué ; la
   page Types masque la description puis le nombre de fichiers. Colonnes de la liste
   proportionnelles à la largeur du volet (`list::disk_layout`, sans séparateurs à glisser,
   les réglages de largeur des autres vues n'y s'appliquent pas) ; la date puis le type
@@ -892,7 +891,8 @@ Tâches de rendu issues de la phase 0 :
      d'état) et ne présenter que ces zones (`softbuffer` `present_with_damage`) — **fait** ;
   3. défilement par décalage : recopier les pixels existants de la liste et ne dessiner que
      les lignes nouvellement visibles — **fait** (détection automatique, sans aide de
-     `fx-ui`) ;
+     `fx-ui` ; plusieurs listes à la fois, chacune de son décalage, pour le défilement
+     synchronisé du multiview — `renderbench --panes N`) ;
   4. en dernier recours, rasterisation parallèle par bandes horizontales sur un pool borné
      (≤ 4 threads, pas de rayon), à mesurer contre le budget de threads — inutile à ce jour.
 
@@ -904,7 +904,7 @@ Tâches de rendu issues de la phase 0 :
 - **Tri naturel ≤ 50 ms sur 100k** (aujourd'hui ≈ 52 ms) : clés de tri précalculées.
 
 ### Phase 2 — Confort
-Vues **Liste/Grille/Cartes** avec miniatures, **double volet**, volet d'aperçu/info,
+Vues **Liste/Grille/Cartes** avec miniatures, **multiview** (plusieurs volets par onglet), volet d'aperçu/info,
 centre d'état (progression, débit), annuler/rétablir, résolution de conflits, palette de
 commandes, éditeur de raccourcis, barre d'outils personnalisable, groupement, préférences
 par dossier, Corbeille, Ce PC, WSL, détection des lecteurs cloud et statut de synchro,
@@ -984,10 +984,29 @@ télémétrie distante.
   « tout sélectionner » au-dessus des icônes dans l'en-tête, ou en haut des vues Liste et
   Grille) ;
   recherche par frappe ; Ctrl + molette (et Ctrl + Plus/Moins)
-  pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **double volet**
-  (onglet titré « gauche | droite » ; le bouton ouvre le second volet sur le dossier en
-  cours ou y intègre un autre onglet, sans rechargement ; en double volet, il ferme l'un
-  des volets ou les sépare en deux onglets) ; volet d'aperçu
+  pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **multiview**
+  (jusqu'à `fx_commands::MAX_PANES` = 6 volets par onglet, côte à côte jusqu'à trois puis
+  sur deux rangées ; onglet titré « a | b | c », largeur partagée entre les noms ; le
+  bouton « Multiview » ajoute un volet sur le dossier en cours (`AddPane`, `Ctrl+Maj+S`) ou
+  y intègre un autre onglet avec tous ses volets, sans rechargement ; en multiview, il
+  ferme n'importe quel volet (`Msg::ClosePane`) ou les sépare en onglets. **Défilement
+  synchronisé** (`ToggleSyncScroll`, `Ctrl+Maj+D`, propre à l'onglet, enregistré avec la
+  session) : interrupteur (`widgets::switch_button`, même dessin que ceux des Paramètres)
+  juste après « Nouveau » dans la barre de commandes, dès que l'onglet a plusieurs volets ;
+  un volet qu'on fait défiler (molette, barre, clavier) entraîne les autres du même écart
+  en points (Détails, Liste, Grille ; pas Colonnes), chacun borné à sa liste ; état
+  purement visuel dans `fx-ui` (`Scroll::follow`), le volet qui suit n'entraîne personne.
+  Le volet qui mène (sous le pointeur, sinon actif) est dessiné en premier : les autres
+  suivent dans la même image (`pane::sync_leader` ; cartes d'abord, contenus ensuite, pour
+  que l'ordre des contenus ne change rien à l'image). Leurs barres de défilement prennent
+  l'opacité de la sienne (`pane::shared_bars`, style dérivé gardé tant que celui de la
+  fenêtre ne change pas). Rendu CPU : une région recopiée par volet (§3.4, « défilement par
+  décalage ») ; 3 volets en 1440p, `renderbench --panes 3` p95 raster 15,6 → 9,5 ms (une
+  seule région recopiée → une par volet), le reste croît avec le nombre de lignes
+  découvertes, donc de volets. Session : `TabSession { left, right, more, sync_scroll }`,
+  lisible par les versions à double volet ; raccourcis personnalisés d'une commande
+  renommée (`ToggleDualPane` → `AddPane`) conservés, ceux d'une commande disparue
+  ignorés sans perdre le reste des réglages) ; volet d'aperçu
   (texte et code colorés, markdown, grande miniature, infos).
 - **Opérations** : `IFileOperation` avec progression (centre d'état : bouton de la barre de
   navigation à côté de Rechercher et de la palette, menu déroulant avec les opérations en

@@ -68,11 +68,13 @@ impl Harness {
         self.view.backdrop = on;
     }
 
-    /// Fait défiler la liste de `step` points à la prochaine image (retour en haut en fin de liste).
+    /// Fait défiler la liste de `step` points à la prochaine image (retour en haut en fin de
+    /// liste) ; en multiview, tous les volets ensemble, comme le défilement synchronisé.
     pub fn scroll(&mut self, step: f32) {
-        let pane = self.state.pane();
-        let rows = pane.listing.as_ref().map_or(0, |l| l.len());
-        self.view.bench_scroll(pane.id, step, rows);
+        for pane in &self.state.tab().panes {
+            let rows = pane.listing.as_ref().map_or(0, |l| l.len());
+            self.view.bench_scroll(pane.id, step, rows);
+        }
     }
 
     pub fn rows(&self) -> usize {

@@ -5,6 +5,7 @@
 //! renderbench --tree bench-data/100k [--frames 300]
 //! renderbench --tree bench-data/100k --verify [--frames 600]
 //! renderbench --tree bench-data/100k [--verify] --acrylic
+//! renderbench --tree bench-data/100k [--verify] --panes 3
 //! cargo run --release -p renderbench --features rayon -- --tree bench-data/100k
 //! ```
 //!
@@ -26,6 +27,9 @@
 //!
 //! `--acrylic` : palette translucide du fond Acrylic ; comme fx dans ce cas, chaque zone
 //! redessinée est d'abord effacée (et tout le tampon pour un rendu complet).
+//!
+//! `--panes N` : multiview de N volets sur le même dossier, en défilement synchronisé (tous
+//! les volets défilent à chaque image : une région recopiée par volet).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -92,9 +96,9 @@ fn main() -> Result<()> {
     if std::env::args().any(|a| a == "--disk") {
         return disk::main();
     }
-    let (tree, frames, verify, acrylic) = parse_args()?;
+    let (tree, frames, verify, acrylic, panes) = parse_args()?;
     if verify {
-        return verify_all(&tree, frames, acrylic);
+        return verify_all(&tree, frames, acrylic, panes);
     }
     let rayon = cfg!(feature = "rayon");
     println!(
@@ -115,7 +119,7 @@ fn main() -> Result<()> {
     );
     for res in &RESOLUTIONS {
         for mode in [Mode::Cache, Mode::Full, Mode::Partial] {
-            let r = run(&tree, res, mode, frames, acrylic)?;
+            let r = run(&tree, res, mode, frames, acrylic, panes)?;
             println!(
                 "{:<11} {:>4.1} {:>7} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.1} Mo",
                 format!("{}x{}", res.w, res.h),
@@ -161,10 +165,17 @@ fn raw_input(res: &Res, frame: usize) -> RawInput {
     raw
 }
 
-fn run(tree: &Path, res: &Res, mode: Mode, frames: usize, acrylic: bool) -> Result<Report> {
+fn run(
+    tree: &Path,
+    res: &Res,
+    mode: Mode,
+    frames: usize,
+    acrylic: bool,
+    panes: usize,
+) -> Result<Report> {
     let before = private_mb();
     let ctx = egui::Context::default();
-    let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree)?);
+    let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree, panes)?);
     harness.set_acrylic(acrylic);
     let mut renderer =
         EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(mode == Mode::Cache);
@@ -227,7 +238,7 @@ fn run(tree: &Path, res: &Res, mode: Mode, frames: usize, acrylic: bool) -> Resu
 
 /// Rendu partiel comparé image par image à un rendu complet, à plusieurs résolutions et
 /// échelles (dont des échelles fractionnaires).
-fn verify_all(tree: &Path, frames: usize, acrylic: bool) -> Result<()> {
+fn verify_all(tree: &Path, frames: usize, acrylic: bool, panes: usize) -> Result<()> {
     let extra = Res {
         w: 1600,
         h: 900,
@@ -235,7 +246,7 @@ fn verify_all(tree: &Path, frames: usize, acrylic: bool) -> Result<()> {
     };
     let mut ok = true;
     for res in RESOLUTIONS[..3].iter().chain([&extra]) {
-        ok &= verify(tree, res, frames, acrylic)?;
+        ok &= verify(tree, res, frames, acrylic, panes)?;
     }
     if !ok {
         bail!("le rendu partiel diffère du rendu complet");
@@ -257,9 +268,9 @@ const VERIFY_STEPS: [f32; 16] = [
     84.0, 84.0, 30.0, -45.0, 0.0, 3.0, -84.0, 120.0, 1.0, 0.0, 0.0, -2.0, 60.0, 17.5, -30.0, 0.0,
 ];
 
-fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool) -> Result<bool> {
+fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool, panes: usize) -> Result<bool> {
     let ctx = egui::Context::default();
-    let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree)?);
+    let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree, panes)?);
     harness.set_acrylic(acrylic);
     let mut partial = EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(false);
     let mut full = EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(false);
@@ -268,6 +279,8 @@ fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool) -> Result<bool> 
     let size = vec2(res.w as f32 / res.ppp, res.h as f32 / res.ppp);
 
     let (mut bad_frames, mut scrolled, mut partial_frames, mut redrawn) = (0, 0, 0, 0u64);
+    // Images où toutes les listes du multiview ont été recopiées (une région par volet).
+    let mut all_regions = 0;
     let mut max_dev = 0u8;
     for i in 0..frames {
         let step = VERIFY_STEPS[i % VERIFY_STEPS.len()];
@@ -303,6 +316,9 @@ fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool) -> Result<bool> 
         if report.scroll.is_some() {
             scrolled += 1;
         }
+        if report.scrolls >= panes {
+            all_regions += 1;
+        }
         let mut n = 0usize;
         let mut worst = 0u8;
         let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
@@ -335,8 +351,15 @@ fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool) -> Result<bool> 
         redrawn as f64 / f64::from(partial_frames) / px * 100.0
     };
     println!(
-        "{}x{} @{} : {frames} images, {partial_frames} partielles ({scrolled} avec décalage), {mean:.1} % des pixels rasterisés en moyenne sur les partielles, écart max {max_dev}, {bad_frames} image(s) fausse(s)",
-        res.w, res.h, res.ppp,
+        "{}x{} @{} : {frames} images, {partial_frames} partielles ({scrolled} avec décalage{}), {mean:.1} % des pixels rasterisés en moyenne sur les partielles, écart max {max_dev}, {bad_frames} image(s) fausse(s)",
+        res.w,
+        res.h,
+        res.ppp,
+        if panes > 1 {
+            format!(", dont {all_regions} sur les {panes} volets")
+        } else {
+            String::new()
+        },
     );
     Ok(bad_frames == 0)
 }
@@ -387,17 +410,39 @@ fn key(key: Key, modifiers: Modifiers) -> Event {
     }
 }
 
-/// Charge le dossier de façon synchrone, par les mêmes messages que l'application.
-fn load(tree: &Path) -> Result<AppState> {
+/// Charge le dossier de façon synchrone, par les mêmes messages que l'application ; avec
+/// `panes` > 1, multiview de `panes` volets sur ce dossier, en défilement synchronisé.
+fn load(tree: &Path, panes: usize) -> Result<AppState> {
     let mut state = AppState::new(
         fx_store::Settings::default(),
         fx_app::Tags::default(),
         Vec::new(),
     );
-    for effect in update(
+    let effects = update(
         &mut state,
         Msg::Navigate(fx_app::Location::Dir(tree.to_path_buf())),
-    ) {
+    );
+    enumerate(&mut state, effects);
+    for _ in 1..panes {
+        let effects = update(&mut state, Msg::Command(fx_commands::CommandId::AddPane));
+        enumerate(&mut state, effects);
+    }
+    if panes > 1 {
+        update(
+            &mut state,
+            Msg::Command(fx_commands::CommandId::ToggleSyncScroll),
+        );
+    }
+    let rows = state.pane().listing.as_ref().map_or(0, |l| l.len());
+    if rows == 0 {
+        bail!("{} : aucun élément chargé", tree.display());
+    }
+    Ok(state)
+}
+
+/// Exécute les énumérations demandées et livre leurs lots à l'état.
+fn enumerate(state: &mut AppState, effects: Vec<Effect>) {
+    for effect in effects {
         let Effect::Enumerate {
             pane,
             generation,
@@ -414,7 +459,7 @@ fn load(tree: &Path) -> Result<AppState> {
             .map_err(|e| e.message().trim().to_owned());
         for batch in batches {
             update(
-                &mut state,
+                state,
                 Msg::ListingBatch {
                     pane,
                     generation,
@@ -423,7 +468,7 @@ fn load(tree: &Path) -> Result<AppState> {
             );
         }
         update(
-            &mut state,
+            state,
             Msg::ListingFinished {
                 pane,
                 generation,
@@ -431,11 +476,6 @@ fn load(tree: &Path) -> Result<AppState> {
             },
         );
     }
-    let rows = state.pane().listing.as_ref().map_or(0, |l| l.len());
-    if rows == 0 {
-        bail!("{} : aucun élément chargé", tree.display());
-    }
-    Ok(state)
 }
 
 fn p50_p95(v: &mut [f64]) -> [f64; 2] {
@@ -452,11 +492,12 @@ fn private_mb() -> f64 {
     fx_win::process::current_memory().map_or(f64::NAN, |m| m.private_bytes as f64 / 1_048_576.0)
 }
 
-fn parse_args() -> Result<(PathBuf, usize, bool, bool)> {
+fn parse_args() -> Result<(PathBuf, usize, bool, bool, usize)> {
     let mut tree = None;
     let mut frames = 300;
     let mut verify = false;
     let mut acrylic = false;
+    let mut panes = 1;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -468,11 +509,17 @@ fn parse_args() -> Result<(PathBuf, usize, bool, bool)> {
             "--frames" => frames = it.next().context("--frames attend un nombre")?.parse()?,
             "--verify" => verify = true,
             "--acrylic" => acrylic = true,
+            "--panes" => {
+                panes = it.next().context("--panes attend un nombre")?.parse()?;
+                if !(1..=fx_commands::MAX_PANES).contains(&panes) {
+                    bail!("--panes : de 1 à {}", fx_commands::MAX_PANES);
+                }
+            }
             other => bail!("option inconnue : {other}"),
         }
     }
     let tree = tree.context("--tree <dossier> est requis")?;
-    Ok((std::path::absolute(tree)?, frames, verify, acrylic))
+    Ok((std::path::absolute(tree)?, frames, verify, acrylic, panes))
 }
 
 #[cfg(test)]
@@ -501,9 +548,11 @@ mod tests {
         };
         let mut ok = true;
         for (ppp, frames) in [1.0, 1.25].into_iter().zip(frames) {
-            ok &= verify(&dir, &Res { w, h, ppp }, frames, false)?;
+            ok &= verify(&dir, &Res { w, h, ppp }, frames, false, 1)?;
         }
-        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], true)?;
+        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], true, 1)?;
+        // Multiview en défilement synchronisé : une région recopiée par volet.
+        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], false, 3)?;
         let _ = std::fs::remove_dir_all(&dir);
         assert!(ok, "le rendu partiel diffère du rendu complet");
         Ok(())

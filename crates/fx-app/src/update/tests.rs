@@ -569,10 +569,10 @@ fn drop_on_recycle_bin_asks_then_deletes() {
 }
 
 #[test]
-fn dual_pane_toggle_and_open_in_other_pane() {
+fn multiview_add_pane_and_open_in_next_pane() {
     let mut s = state();
     open(&mut s, r"C:\a", &[("sub", true)]);
-    update(&mut s, Msg::Command(CommandId::ToggleDualPane));
+    update(&mut s, Msg::Command(CommandId::AddPane));
     assert_eq!(s.tab().panes.len(), 2);
     assert_eq!(s.tab().active, 1);
     update(&mut s, Msg::Command(CommandId::FocusOtherPane));
@@ -592,15 +592,33 @@ fn dual_pane_toggle_and_open_in_other_pane() {
         fx.iter()
             .any(|e| matches!(e, Effect::Enumerate { path, .. } if path == Path::new(r"C:\a\sub")))
     );
-    let fx = update(&mut s, Msg::Command(CommandId::ToggleDualPane));
-    assert!(matches!(&fx[..], [Effect::Unwatch { .. }]));
+    let fx = update(&mut s, Msg::Command(CommandId::ClosePane));
+    assert!(matches!(&fx[..], [Effect::Unwatch { key }] if *key == p.0));
+    assert_eq!(s.tab().panes.len(), 1);
 }
 
-/// Onglet en double volet : gauche dans `C:\a`, droite dans `C:\b` (volet de droite actif).
+#[test]
+fn multiview_holds_up_to_max_panes() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    for n in 2..=fx_commands::MAX_PANES {
+        let fx = update(&mut s, Msg::Command(CommandId::AddPane));
+        assert!(
+            fx.iter()
+                .any(|e| matches!(e, Effect::Enumerate { path, .. } if path == Path::new(r"C:\a")))
+        );
+        assert_eq!((s.tab().panes.len(), s.tab().active), (n, n - 1));
+    }
+    assert!(!s.command_context().can_add_pane);
+    assert!(update(&mut s, Msg::Command(CommandId::AddPane)).is_empty());
+    assert_eq!(s.tab().panes.len(), fx_commands::MAX_PANES);
+}
+
+/// Onglet en multiview : gauche dans `C:\a`, droite dans `C:\b` (volet de droite actif).
 fn dual_tab() -> (AppState, PaneId, PaneId) {
     let mut s = state();
     open(&mut s, r"C:\a", &[]);
-    update(&mut s, Msg::Command(CommandId::ToggleDualPane));
+    update(&mut s, Msg::Command(CommandId::AddPane));
     let (left, right) = (s.tab().panes[0].id, s.tab().panes[1].id);
     update(
         &mut s,
@@ -609,17 +627,28 @@ fn dual_tab() -> (AppState, PaneId, PaneId) {
     (s, left, right)
 }
 
-#[test]
-fn dual_tab_title_names_both_folders() {
-    let (s, ..) = dual_tab();
-    assert_eq!(s.tab().title(), "a | b");
-    assert!(s.command_context().dual_pane);
+/// Trois volets : `C:\a`, `C:\b`, `C:\c` (le dernier actif).
+fn triple_tab() -> (AppState, [PaneId; 3]) {
+    let (mut s, a, b) = dual_tab();
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    let c = s.pane().id;
+    update(&mut s, Msg::NavigatePane(c, Location::Dir(r"C:\c".into())));
+    (s, [a, b, c])
 }
 
 #[test]
-fn close_left_or_right_pane() {
+fn multiview_tab_title_names_every_folder() {
+    let (s, ..) = dual_tab();
+    assert_eq!(s.tab().title(), "a | b");
+    assert!(s.command_context().multi_pane);
+    let (s, _) = triple_tab();
+    assert_eq!(s.tab().title(), "a | b | c");
+}
+
+#[test]
+fn close_any_pane_of_a_multiview() {
     let (mut s, left, right) = dual_tab();
-    let fx = update(&mut s, Msg::Command(CommandId::CloseLeftPane));
+    let fx = update(&mut s, Msg::ClosePane(left));
     assert!(
         fx.iter()
             .any(|e| matches!(e, Effect::Unwatch { key } if *key == left.0))
@@ -627,47 +656,78 @@ fn close_left_or_right_pane() {
     assert_eq!(s.tab().panes.len(), 1);
     assert_eq!(s.pane().id, right);
     assert_eq!(s.tab().title(), "b");
-    // Plus de double volet : sans effet.
-    assert!(update(&mut s, Msg::Command(CommandId::CloseRightPane)).is_empty());
+    // Dernier volet : sans effet.
+    assert!(update(&mut s, Msg::ClosePane(right)).is_empty());
+    assert!(update(&mut s, Msg::Command(CommandId::ClosePane)).is_empty());
 
-    let (mut s, left, right) = dual_tab();
-    let fx = update(&mut s, Msg::Command(CommandId::CloseRightPane));
-    assert!(
-        fx.iter()
-            .any(|e| matches!(e, Effect::Unwatch { key } if *key == right.0))
+    // Volet du milieu fermé, focus sur le dernier : il le garde.
+    let (mut s, [a, b, c]) = triple_tab();
+    update(&mut s, Msg::ClosePane(b));
+    assert_eq!(
+        s.tab().panes.iter().map(|p| p.id).collect::<Vec<_>>(),
+        [a, c]
     );
-    assert_eq!(s.pane().id, left);
+    assert_eq!(s.pane().id, c);
+    // Volet actif fermé : le focus passe à son voisin de gauche.
+    update(&mut s, Msg::Command(CommandId::ClosePane));
+    assert_eq!(s.pane().id, a);
     assert_eq!(s.tabs.len(), 1);
 }
 
 #[test]
-fn separate_panes_into_two_tabs() {
-    let (mut s, left, right) = dual_tab();
+fn sync_scroll_toggles_only_in_multiview() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    assert!(!CommandId::ToggleSyncScroll.is_enabled(&s.command_context()));
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
+    assert!(!s.tab().sync_scroll);
+
+    let (mut s, left, _) = dual_tab();
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
+    assert!(s.tab().sync_scroll);
+    // Propre à l'onglet.
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    assert!(!s.tab().sync_scroll);
+    update(&mut s, Msg::SelectTab(0));
+    assert!(s.tab().sync_scroll);
+    // Revenu à un seul volet : coupé.
+    update(&mut s, Msg::ClosePane(left));
+    assert!(!s.tab().sync_scroll);
+    assert!(!s.session().tabs[0].sync_scroll);
+}
+
+#[test]
+fn separate_panes_into_tabs() {
+    let (mut s, [a, b, c]) = triple_tab();
     update(&mut s, Msg::Command(CommandId::NewTab));
     update(&mut s, Msg::SelectTab(0));
+    update(&mut s, Msg::FocusPane(b));
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
     let fx = update(&mut s, Msg::Command(CommandId::SeparatePanes));
     // Rien à recharger ni à cesser de surveiller : les volets changent seulement d'onglet.
     assert!(
         !fx.iter()
             .any(|e| matches!(e, Effect::Enumerate { .. } | Effect::Unwatch { .. }))
     );
-    assert_eq!(s.tabs.len(), 3);
-    assert_eq!(
-        s.tabs[0].panes.iter().map(|p| p.id).collect::<Vec<_>>(),
-        [left]
-    );
-    assert_eq!(
-        s.tabs[1].panes.iter().map(|p| p.id).collect::<Vec<_>>(),
-        [right]
-    );
-    assert_eq!(s.tabs[2].active_pane().location(), &Location::Home);
-    // Le volet actif (droite) reste affiché.
-    assert_eq!((s.active_tab, s.pane().id), (1, right));
-    assert_ne!(s.tabs[0].id, s.tabs[1].id);
+    assert_eq!(s.tabs.len(), 4);
+    let ids: Vec<Vec<PaneId>> = s
+        .tabs
+        .iter()
+        .take(3)
+        .map(|t| t.panes.iter().map(|p| p.id).collect())
+        .collect();
+    assert_eq!(ids, [vec![a], vec![b], vec![c]]);
+    assert_eq!(s.tabs[3].active_pane().location(), &Location::Home);
+    // Le volet actif (celui du milieu) reste affiché.
+    assert_eq!((s.active_tab, s.pane().id), (1, b));
+    assert!(s.tabs.iter().all(|t| !t.sync_scroll));
+    let mut tab_ids: Vec<u64> = s.tabs.iter().map(|t| t.id).collect();
+    tab_ids.dedup();
+    assert_eq!(tab_ids.len(), 4);
 }
 
 #[test]
-fn merge_tab_into_second_pane() {
+fn merge_tabs_into_multiview() {
     let mut s = state();
     open(&mut s, r"C:\a", &[]);
     update(&mut s, Msg::OpenInNewTab(Location::Dir(r"C:\b".into())));
@@ -682,16 +742,38 @@ fn merge_tab_into_second_pane() {
     assert_eq!(s.tab().panes.len(), 2);
     assert_eq!((s.tab().active, s.pane().id), (1, b));
     assert_eq!(s.tab().title(), "Accueil | b");
-    // Déjà en double volet, onglet actif lui-même, index hors limites : sans effet.
+    // Un onglet de plus s'ajoute encore à droite.
+    let a = s.tabs[0].panes[0].id;
     update(&mut s, Msg::MergeTabIntoPane(0));
-    assert_eq!(s.tabs.len(), 2);
-    update(&mut s, Msg::SelectTab(0));
+    assert_eq!((s.tabs.len(), s.active_tab), (1, 0));
+    assert_eq!((s.tab().active, s.pane().id), (2, a));
+    assert_eq!(s.tab().title(), "Accueil | b | a");
+    // Onglet actif lui-même, index hors limites : sans effet.
     update(&mut s, Msg::MergeTabIntoPane(0));
     update(&mut s, Msg::MergeTabIntoPane(9));
+    assert_eq!((s.tabs.len(), s.tab().panes.len()), (1, 3));
+}
+
+#[test]
+fn merging_a_multiview_tab_brings_all_its_panes_within_the_limit() {
+    let (mut s, a, b) = dual_tab();
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    update(&mut s, Msg::MergeTabIntoPane(0));
+    assert_eq!(s.tabs.len(), 1);
+    let ids: Vec<PaneId> = s.tab().panes.iter().map(|p| p.id).collect();
+    assert_eq!(&ids[2..], [a, b]);
+    // Le premier volet intégré prend le focus.
+    assert_eq!(s.pane().id, a);
+
+    // Trop de volets au total : refusé.
+    let (mut s, ..) = dual_tab();
+    update(&mut s, Msg::Command(CommandId::NewTab));
+    for _ in 1..fx_commands::MAX_PANES - 1 {
+        update(&mut s, Msg::Command(CommandId::AddPane));
+    }
+    assert!(update(&mut s, Msg::MergeTabIntoPane(0)).is_empty());
     assert_eq!(s.tabs.len(), 2);
-    // Un onglet en double volet ne s'intègre pas.
-    update(&mut s, Msg::MergeTabIntoPane(1));
-    assert_eq!((s.tabs.len(), s.tab().panes.len()), (2, 1));
 }
 
 #[test]
@@ -1225,8 +1307,12 @@ fn layout_change_is_remembered_and_columns_open() {
 fn session_roundtrip_restores_tabs() {
     let mut s = state();
     open(&mut s, r"C:\a", &[]);
-    update(&mut s, Msg::Command(CommandId::ToggleDualPane));
+    for _ in 0..2 {
+        update(&mut s, Msg::Command(CommandId::AddPane));
+    }
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
     let session = s.session();
+    assert_eq!(session.tabs[0].more.len(), 1);
     let mut t = state();
     let fx = update(
         &mut t,
@@ -1236,12 +1322,13 @@ fn session_roundtrip_restores_tabs() {
             start_in_new_tab: false,
         },
     );
-    assert_eq!(t.tab().panes.len(), 2);
+    assert_eq!(t.tab().panes.len(), 3);
+    assert!(t.tab().sync_scroll);
     assert_eq!(
         fx.iter()
             .filter(|e| matches!(e, Effect::Enumerate { .. }))
             .count(),
-        2
+        3
     );
 }
 
@@ -1902,7 +1989,7 @@ fn analyze_space_opens_a_new_tab_without_replacing_a_pane() {
     let (mut s, left, right) = dual_tab();
     let fx = update(&mut s, Msg::AnalyzeSpace(PathBuf::from(r"C:\r")));
     scan_id(&fx);
-    // Le double volet reste intact dans son onglet.
+    // Le multiview reste intact dans son onglet.
     assert_eq!(s.tabs.len(), 2);
     let dual: Vec<(PaneId, &Location)> = s.tabs[0]
         .panes
@@ -1925,7 +2012,7 @@ fn analyze_space_opens_a_new_tab_without_replacing_a_pane() {
             dir: PathBuf::from(r"C:\r")
         }
     );
-    // La fermer ferme cet onglet et rend le double volet.
+    // La fermer ferme cet onglet et rend le multiview.
     let p = pane(&s);
     update(&mut s, Msg::CloseDiskUsage(p));
     assert_eq!((s.tabs.len(), s.active_tab), (1, 0));

@@ -4,7 +4,7 @@
 //! aussitôt.
 
 use eframe::egui::{
-    self, Align, Align2, Color32, Frame, Id, Layout, RichText, ScrollArea, Sense, Ui, pos2, vec2,
+    self, Align, Align2, Frame, Id, Layout, RichText, ScrollArea, Sense, Ui, pos2, vec2,
 };
 use fx_app::Msg;
 use fx_app::upgrade::{Release, Status};
@@ -184,36 +184,7 @@ fn toggle(ui: &mut Ui, on: &mut bool) {
     if r.clicked() {
         *on = !*on;
     }
-    let t = ui.ctx().animate_bool_with_time(r.id, *on, 0.12);
-    let v = ui.visuals();
-    let accent = v.hyperlink_color;
-    let bg = if *on { accent } else { Color32::TRANSPARENT };
-    ui.painter()
-        .rect_filled(rect, 10.0, bg.gamma_multiply(t.max(0.0)));
-    ui.painter().rect_stroke(
-        rect,
-        10.0,
-        egui::Stroke::new(
-            1.0,
-            if *on {
-                accent
-            } else {
-                v.widgets.noninteractive.fg_stroke.color
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, t);
-    let knob = if *on {
-        Color32::WHITE
-    } else {
-        v.widgets.noninteractive.fg_stroke.color
-    };
-    ui.painter().circle_filled(
-        pos2(x, rect.center().y),
-        if r.hovered() { 6.0 } else { 5.0 },
-        knob,
-    );
+    crate::widgets::paint_switch(ui, rect, r.id, *on, r.hovered());
 }
 
 fn general(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
@@ -938,7 +909,7 @@ mod tests {
     #[test]
     fn long_description_stays_clear_of_the_control() {
         let ctx = egui::Context::default();
-        let pal = crate::theme::Palette::new(true, Color32::from_rgb(0, 120, 212));
+        let pal = crate::theme::Palette::new(true, egui::Color32::from_rgb(0, 120, 212));
         let desc = "Les dossiers ouverts depuis les autres applications (navigateur, Bureau, \
                     raccourcis) s'ouvrent dans un nouvel onglet de la dernière fenêtre folder \
                     au lieu de l'Explorateur Windows.";

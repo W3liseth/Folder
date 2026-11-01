@@ -27,7 +27,10 @@ pub struct CommandContext {
     pub can_redo: bool,
     pub tabs: usize,
     pub closed_tabs: usize,
-    pub dual_pane: bool,
+    /// L'onglet affiche plusieurs volets (multiview).
+    pub multi_pane: bool,
+    /// L'onglet peut recevoir un volet de plus ([`MAX_PANES`]).
+    pub can_add_pane: bool,
     /// Sélection d'un seul fichier (pas dossier).
     pub single_file: bool,
     /// Sélection d'une archive .zip.
@@ -111,15 +114,15 @@ commands! {
     PreviousTab => Tabs, "Onglet précédent", "\u{E76B}", ["Ctrl+Shift+Tab", "Ctrl+PageUp"];
     ReopenClosedTab => Tabs, "Rouvrir l'onglet fermé", "\u{E7A7}", ["Ctrl+Shift+T"];
     NewWindow => Tabs, "Nouvelle fenêtre", "\u{E737}", ["Ctrl+N"];
-    ToggleDualPane => Tabs, "Double volet", "\u{E89F}", ["Ctrl+Shift+S"];
+    AddPane => Tabs, "Multiview : ajouter un volet", "\u{E89F}", ["Ctrl+Shift+S"];
     FocusOtherPane => Tabs, "Volet suivant", "\u{E8AB}", ["Ctrl+Shift+Right"];
-    CloseLeftPane => Tabs, "Fermer le volet de gauche", "\u{E711}", [];
-    CloseRightPane => Tabs, "Fermer le volet de droite", "\u{E711}", [];
-    SeparatePanes => Tabs, "Séparer les volets en deux onglets", "\u{E8A7}", [];
+    ClosePane => Tabs, "Fermer le volet actif", "\u{E711}", [];
+    SeparatePanes => Tabs, "Séparer les volets en onglets", "\u{E8A7}", [];
+    ToggleSyncScroll => Tabs, "Défilement synchronisé", "\u{E71B}", ["Ctrl+Shift+D"];
     // Fichiers
     Open => Files, "Ouvrir", "\u{E8E5}", ["Enter"];
     OpenInNewTab => Files, "Ouvrir dans un nouvel onglet", "\u{E8A7}", ["Ctrl+Enter"];
-    OpenInOtherPane => Files, "Ouvrir dans l'autre volet", "\u{E89F}", [];
+    OpenInOtherPane => Files, "Ouvrir dans le volet suivant", "\u{E89F}", [];
     OpenWith => Files, "Ouvrir avec…", "\u{E7AC}", [];
     OpenTerminal => Files, "Ouvrir dans le terminal", "\u{E756}", ["Ctrl+`"];
     RunAsAdmin => Files, "Exécuter en tant qu'administrateur", "\u{E7EF}", [];
@@ -178,7 +181,26 @@ commands! {
     ReleaseNotes => Application, "Notes de version", "\u{E7BC}", [];
 }
 
+/// Volets d'un onglet en multiview, au plus : au-delà, chacun deviendrait trop étroit.
+pub const MAX_PANES: usize = 6;
+
+/// Anciens identifiants de commandes renommées (raccourcis personnalisés enregistrés par une
+/// version précédente).
+const RENAMED: &[(&str, CommandId)] = &[("ToggleDualPane", CommandId::AddPane)];
+
 impl CommandId {
+    /// Commande d'après son identifiant enregistré, anciens noms compris ; `None` pour une
+    /// commande disparue.
+    pub fn from_name(name: &str) -> Option<Self> {
+        use serde::de::IntoDeserializer;
+        if let Some(&(_, id)) = RENAMED.iter().find(|(old, _)| *old == name) {
+            return Some(id);
+        }
+        let de: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
+            name.into_deserializer();
+        Self::deserialize(de).ok()
+    }
+
     /// La commande est-elle applicable dans ce contexte ?
     pub fn is_enabled(self, c: &CommandContext) -> bool {
         use CommandId::*;
@@ -200,7 +222,7 @@ impl CommandId {
             }
             Open | OpenInNewTab | Cut | Copy | CopyPath | Delete | DeletePermanently
             | Properties | PinToSidebar | CompressToZip | ShowMoreOptions => c.selection > 0,
-            OpenInOtherPane => c.selection > 0 && c.dual_pane,
+            OpenInOtherPane => c.selection > 0 && c.multi_pane,
             Rename => c.selection == 1,
             BulkRename => c.selection > 1,
             OpenWith | RunAsAdmin => c.single_file,
@@ -209,7 +231,8 @@ impl CommandId {
             CloseTab => c.tabs > 1,
             NextTab | PreviousTab => c.tabs > 1,
             ReopenClosedTab => c.closed_tabs > 0,
-            FocusOtherPane | CloseLeftPane | CloseRightPane | SeparatePanes => c.dual_pane,
+            FocusOtherPane | ClosePane | SeparatePanes | ToggleSyncScroll => c.multi_pane,
+            AddPane => c.can_add_pane,
             Undo => c.can_undo,
             Redo => c.can_redo,
             EmptyRecycleBin => true,
@@ -351,6 +374,16 @@ mod tests {
         assert!(CommandId::InvertSelection.is_enabled(&c));
         assert!(!CommandId::NewFolder.is_enabled(&c));
         assert!(!CommandId::SelectAll.is_enabled(&CommandContext::default()));
+    }
+
+    #[test]
+    fn command_names_survive_renames() {
+        assert_eq!(CommandId::from_name("Copy"), Some(CommandId::Copy));
+        assert_eq!(
+            CommandId::from_name("ToggleDualPane"),
+            Some(CommandId::AddPane)
+        );
+        assert_eq!(CommandId::from_name("CloseLeftPane"), None);
     }
 
     #[test]

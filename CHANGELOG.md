@@ -5,6 +5,23 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.12.0 — 2026-11-01
+
+- Le double volet devient **Multiview** : jusqu'à six volets dans un même onglet, côte à
+  côte jusqu'à trois, puis sur deux rangées. Le bouton « Multiview » ajoute un volet sur
+  le dossier en cours (Ctrl+Maj+S) ou y intègre un autre onglet, même s'il a déjà
+  plusieurs volets ; il ferme aussi n'importe quel volet ou les sépare chacun dans son
+  onglet. L'onglet est titré avec le nom de chaque dossier (« a | b | c »).
+- **Défilement synchronisé** : dans un onglet en multiview, un interrupteur juste après
+  « Nouveau » dans la barre de commandes (ou Ctrl+Maj+D, modifiable dans Paramètres ›
+  Raccourcis) fait défiler tous les volets ensemble (molette, barre de défilement ou
+  clavier ; vues Détails, Liste et Grandes icônes). Le réglage est propre à chaque onglet
+  et retrouvé à la réouverture. Les barres de défilement apparaissent dans tous les
+  volets, et ils défilent tous à la même image, sans retard ni saccade : le rendu ne
+  redessine plus en entier les volets qui suivent, il recopie leur contenu comme pour
+  celui qu'on fait défiler.
+- Les raccourcis personnalisés du double volet sont conservés.
+
 ## 0.11.1 — 2026-11-01
 
 - « Ouvrir les dossiers dans folder » : quand folder est fermé, un dossier ouvert depuis

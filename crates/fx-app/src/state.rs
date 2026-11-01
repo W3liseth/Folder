@@ -196,8 +196,12 @@ pub fn path_of(listing: &DirSnapshot, id: u32) -> PathBuf {
 #[derive(Debug)]
 pub struct Tab {
     pub id: u64,
+    /// Un volet, ou plusieurs côte à côte (multiview, [`fx_commands::MAX_PANES`] au plus).
     pub panes: Vec<Pane>,
     pub active: usize,
+    /// Multiview : faire défiler un volet fait défiler les autres d'autant (état visuel
+    /// appliqué par `fx-ui`).
+    pub sync_scroll: bool,
 }
 
 impl Tab {
@@ -205,16 +209,22 @@ impl Tab {
         &self.panes[self.active.min(self.panes.len() - 1)]
     }
 
-    /// Titre : le dossier affiché, ou ceux des deux volets (« gauche | droite »).
+    /// Titre : le dossier affiché, ou ceux de chaque volet (« a | b | c »).
     pub fn title(&self) -> String {
-        match self.panes.as_slice() {
-            [a, b, ..] => format!("{} | {}", a.location().title(), b.location().title()),
-            _ => self.active_pane().location().title(),
+        if self.panes.len() < 2 {
+            return self.active_pane().location().title();
         }
+        let names: Vec<String> = self.panes.iter().map(|p| p.location().title()).collect();
+        names.join(" | ")
     }
 
-    pub fn is_dual(&self) -> bool {
+    pub fn is_multi(&self) -> bool {
         self.panes.len() > 1
+    }
+
+    /// Peut recevoir `n` volets de plus.
+    pub fn has_room(&self, n: usize) -> bool {
+        self.panes.len() + n <= fx_commands::MAX_PANES
     }
 }
 
@@ -534,6 +544,7 @@ impl AppState {
             id: self.next_id(),
             panes: vec![pane],
             active: 0,
+            sync_scroll: false,
         }
     }
 
@@ -633,7 +644,8 @@ impl AppState {
             can_redo: self.undo.can_redo(),
             tabs: self.tabs.len(),
             closed_tabs: self.closed_tabs.len(),
-            dual_pane: self.tab().panes.len() > 1,
+            multi_pane: self.tab().is_multi(),
+            can_add_pane: self.tab().has_room(1),
             single_file,
             zip_selected: selected
                 .iter()
@@ -681,6 +693,8 @@ impl AppState {
                 .map(|t| fx_store::TabSession {
                     left: pane_session(&t.panes[0]),
                     right: t.panes.get(1).map(pane_session),
+                    more: t.panes.iter().skip(2).map(pane_session).collect(),
+                    sync_scroll: t.sync_scroll && t.is_multi(),
                 })
                 .collect(),
             active: self.active_tab,

@@ -529,9 +529,10 @@ impl EguiSoftwareRender {
                     draw(buffer, p, &p.clip);
                 }
             }
-            damage::Plan::Partial { scroll } => {
-                if let Some((_, t)) = scroll {
-                    damage::shift_rects(buffer.data, buffer.width, &inc.copy_rects, *t);
+            damage::Plan::Partial => {
+                // Une plage de rectangles par région qui défile, chacune de son décalage.
+                for &(a, b, t) in &inc.copy_spans {
+                    damage::shift_rects(buffer.data, buffer.width, &inc.copy_rects[a..b], t);
                 }
                 for rect in &inc.rects {
                     if clear {

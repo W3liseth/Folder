@@ -63,7 +63,7 @@ pub mod glyph {
     pub const DELETE: &str = "\u{E74D}";
     pub const CLOCK: &str = "\u{E823}";
     pub const HISTORY: &str = "\u{E81C}";
-    pub const DUAL: &str = "\u{E89F}";
+    pub const MULTI: &str = "\u{E89F}";
     pub const STAR: &str = "\u{E734}";
     pub const SUCCESS: &str = "\u{E930}";
     pub const WARNING: &str = "\u{E7BA}";

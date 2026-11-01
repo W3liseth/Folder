@@ -66,6 +66,10 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             nav::after_selection(state)
         }
         Msg::MergeTabIntoPane(i) => nav::merge_tab_into_pane(state, i),
+        Msg::ClosePane(id) => match state.tab().panes.iter().position(|p| p.id == id) {
+            Some(i) => nav::close_pane(state, i),
+            None => vec![],
+        },
         Msg::OpenPath(path) => nav::open_path(state, path),
         Msg::OpenAddress(text) => nav::open_address(state, &text),
         Msg::OpenSystemSettings(uri) => vec![Effect::Open(uri.into())],

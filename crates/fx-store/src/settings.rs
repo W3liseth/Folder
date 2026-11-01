@@ -80,6 +80,7 @@ pub struct Settings {
     pub pinned: Vec<PathBuf>,
     pub pinned_initialized: bool,
     /// Raccourcis personnalisés (remplacent les défauts de la commande).
+    #[serde(deserialize_with = "keybindings")]
     pub keybindings: HashMap<CommandId, Vec<HotKey>>,
     /// Windows + E ouvre folder (une nouvelle fenêtre par appui) au lieu de l'Explorateur.
     pub win_e_opens_folder: bool,
@@ -158,11 +159,30 @@ pub struct WindowPlacement {
     pub maximized: bool,
 }
 
+/// Raccourcis personnalisés : une commande renommée garde les siens, ceux d'une commande
+/// disparue sont oubliés (sans cela, tout le fichier de réglages serait illisible).
+fn keybindings<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<HashMap<CommandId, Vec<HotKey>>, D::Error> {
+    let raw: HashMap<String, Vec<HotKey>> = HashMap::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|(name, keys)| Some((CommandId::from_name(&name)?, keys)))
+        .collect())
+}
+
+/// Volets d'un onglet : `left` et `right` pour les deux premiers (format des versions à
+/// double volet, toujours lisible), `more` pour les suivants (multiview).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabSession {
     pub left: PaneSession,
     pub right: Option<PaneSession>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub more: Vec<PaneSession>,
+    /// Défilement synchronisé des volets.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sync_scroll: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

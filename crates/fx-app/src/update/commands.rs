@@ -147,22 +147,17 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             start: Some(state.pane().location().window_arg()),
             rect: None,
         }],
-        ToggleDualPane => {
-            let loc = state.pane().location().clone();
-            if state.tab().is_dual() {
-                nav::close_pane(state, 1)
-            } else {
-                let pane = state.new_pane(Location::Home);
-                let id = pane.id;
-                let tab = state.tab_mut();
-                tab.panes.push(pane);
-                tab.active = 1;
-                nav::load(state, id, loc, false)
-            }
+        AddPane => nav::add_pane(state),
+        ClosePane => {
+            let i = state.tab().active;
+            nav::close_pane(state, i)
         }
-        CloseLeftPane => nav::close_pane(state, 0),
-        CloseRightPane => nav::close_pane(state, 1),
         SeparatePanes => nav::separate_panes(state),
+        ToggleSyncScroll => {
+            let tab = state.tab_mut();
+            tab.sync_scroll = !tab.sync_scroll && tab.is_multi();
+            vec![]
+        }
         FocusOtherPane => {
             let tab = state.tab_mut();
             tab.active = (tab.active + 1) % tab.panes.len();

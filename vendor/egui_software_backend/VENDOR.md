@@ -23,6 +23,11 @@
   - un contenu translaté verticalement d'un nombre entier de pixels dans une découpe restée en
     place (liste qui défile) est détecté ; ses pixels sont recopiés (`shift_rects`), seulement
     là où du contenu mobile se trouvait ou arrive, et seule la bande découverte est rasterisée.
+    Plusieurs régions disjointes peuvent défiler dans la même image, chacune de son propre
+    décalage (au plus 8 : les listes du multiview en défilement synchronisé) ; les
+    partenaires d'une primitive sont cherchés à même abscisse (index trié par empreinte,
+    abscisse, indice), ce qui évite d'épuiser la limite de candidats avec des icônes
+    identiques d'autres listes. `DamageReport::scrolls` et `rects` en rendent compte.
     Les primitives fixes qui recouvrent la zone (fond de la carte, ombres de bord) sont
     analysées triangle par triangle : intérieur des aplats unis invariant, bords et triangles
     non unis endommagés ;

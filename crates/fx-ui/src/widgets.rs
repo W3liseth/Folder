@@ -22,6 +22,66 @@ pub fn hover_fill(ui: &Ui, resp: &Response, rect: Rect, pal: &Palette, radius: f
     }
 }
 
+/// Interrupteur (40 × 20 points) dessiné dans `rect` : piste remplie d'accent et pastille à
+/// droite quand il est activé, bascule animée (120 ms, clé `id`). Réglages et barre de
+/// commandes.
+pub fn paint_switch(ui: &Ui, rect: Rect, id: egui::Id, on: bool, hovered: bool) {
+    let t = ui.ctx().animate_bool_with_time(id, on, 0.12);
+    let v = ui.visuals();
+    let accent = v.hyperlink_color;
+    let bg = if on { accent } else { Color32::TRANSPARENT };
+    ui.painter()
+        .rect_filled(rect, 10.0, bg.gamma_multiply(t.max(0.0)));
+    ui.painter().rect_stroke(
+        rect,
+        10.0,
+        egui::Stroke::new(
+            1.0,
+            if on {
+                accent
+            } else {
+                v.widgets.noninteractive.fg_stroke.color
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, t);
+    let knob = if on {
+        Color32::WHITE
+    } else {
+        v.widgets.noninteractive.fg_stroke.color
+    };
+    ui.painter().circle_filled(
+        pos2(x, rect.center().y),
+        if hovered { 6.0 } else { 5.0 },
+        knob,
+    );
+}
+
+/// Interrupteur avec libellé, à la hauteur des boutons de barre d'outils (32 points) : toute
+/// la surface bascule, avec le même survol que [`tool_button`].
+pub fn switch_button(ui: &mut Ui, pal: &Palette, label: &str, on: bool) -> Response {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), FontId::proportional(13.5), pal.text);
+    let w = 10.0 + 40.0 + 8.0 + galley.size().x + 12.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        hover_fill(ui, &resp, rect, pal, 4.0);
+        let track = Rect::from_min_size(
+            pos2(rect.left() + 10.0, rect.center().y - 10.0),
+            vec2(40.0, 20.0),
+        );
+        paint_switch(ui, track, resp.id.with("switch"), on, resp.hovered());
+        ui.painter().galley(
+            pos2(track.right() + 8.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            pal.text,
+        );
+    }
+    resp
+}
+
 /// Bouton icône plat (barres d'outils, navigation).
 pub fn icon_button(
     ui: &mut Ui,
@@ -603,7 +663,7 @@ pub fn tag_dot(ui: &Ui, center: egui::Pos2, radius: f32, color: [u8; 3]) {
     );
 }
 
-/// Contour de focus (volet actif en double volet).
+/// Contour de focus (volet actif en multiview).
 pub fn focus_ring(ui: &Ui, rect: Rect, pal: &Palette) {
     ui.painter().rect_stroke(
         rect,

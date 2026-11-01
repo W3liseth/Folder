@@ -92,6 +92,12 @@ impl WheelGlide {
         set_bar_opacity(ctx, shown);
     }
 
+    /// Un défilement autre que la molette ou le clavier (barre saisie, défilement
+    /// synchronisé) : les barres restent affichées [`BAR_HOLD`] secondes de plus.
+    pub fn keep_bars(&mut self, now: f64) {
+        self.last_activity = Some(now);
+    }
+
     /// Temps restant (s) avant l'effacement des barres ; 0 : effacées.
     fn bar_left(&self, now: f64) -> f64 {
         self.last_activity

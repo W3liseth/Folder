@@ -47,6 +47,9 @@ const PRESENT_BAND: i32 = 8;
 const SUBPIX: f32 = 256.0;
 /// Partenaires examinés par primitive pour détecter le défilement.
 const MAX_CANDIDATES: usize = 64;
+/// Régions qui défilent dans une même image, au plus (fx : une liste par volet du
+/// multiview, que le défilement synchronisé fait défiler ensemble).
+const MAX_SCROLLS: usize = 8;
 
 /// Rectangle de pixels `[x0, x1) × [y0, y1)`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -149,12 +152,17 @@ fn sat_i32(v: f32) -> i32 {
 pub struct DamageReport {
     /// Image redessinée entièrement.
     pub full: bool,
-    /// Région décalée et décalage vertical (pixels) appliqué à son contenu.
+    /// Région décalée et décalage vertical (pixels) appliqué à son contenu (la première,
+    /// s'il y en a plusieurs).
     pub scroll: Option<(DamageRect, i32)>,
+    /// Régions décalées, chacune de son propre décalage.
+    pub scrolls: usize,
     /// Pixels rasterisés (somme des rectangles redessinés).
     pub redrawn_px: u64,
     /// Pixels recopiés par le décalage.
     pub copied_px: u64,
+    /// Rectangles redessinés (chacun coûte un parcours des primitives qui le touchent).
+    pub rects: usize,
 }
 
 /// Une primitive de l'image, en pixels.
@@ -223,11 +231,23 @@ pub(crate) struct Incremental {
     prev: Frame,
     prev_valid: bool,
     abs_index: Vec<(u64, u32)>,
-    rel_index: Vec<(u64, u32)>,
+    /// (empreinte relative, abscisse du premier sommet, indice) : un décalage vertical garde
+    /// l'abscisse, seules les primitives de même abscisse sont des partenaires possibles.
+    rel_index: Vec<(u64, i32, u32)>,
     matches: Vec<Match>,
     /// Appariement de chaque ancienne primitive.
     old_matches: Vec<Match>,
     votes: Vec<(i32, DamageRect, u64)>,
+    /// Régions qui défilent à cette image et leur décalage (disjointes).
+    scrolls: Vec<(DamageRect, i32)>,
+    /// Découpes candidates au défilement (aire du contenu qui y a bougé).
+    regions: Vec<(DamageRect, u64)>,
+    /// Votes (région candidate, décalage, poids).
+    region_votes: Vec<(usize, i32, u64)>,
+    /// Tuiles recopiées, toutes régions confondues (présentation).
+    copy_union: Vec<u8>,
+    /// Rectangles recopiés d'une région, avant leur ajout à `copy_rects`.
+    region_rects: Vec<DamageRect>,
     /// Zones de textures réécrites pour cette image (UV normalisées).
     dirty_textures: Vec<(TextureId, Rect)>,
     tiles: Vec<u8>,
@@ -245,6 +265,8 @@ pub(crate) struct Incremental {
     /// Rectangles recopiés par le décalage (dans l'ordre où les recopier), disjoints des
     /// rectangles redessinés.
     pub copy_rects: Vec<DamageRect>,
+    /// Plages de `copy_rects` par région, et leur décalage.
+    pub copy_spans: Vec<(usize, usize, i32)>,
     /// Rectangles à présenter (redessinés et recopiés).
     pub present: Vec<DamageRect>,
     pub report: DamageReport,
@@ -253,7 +275,9 @@ pub(crate) struct Incremental {
 /// Résultat de la planification d'une image.
 pub(crate) enum Plan {
     Full,
-    Partial { scroll: Option<(DamageRect, i32)> },
+    /// Zones modifiées redessinées ; contenu des régions qui défilent recopié
+    /// (`copy_rects`, par plages `copy_spans`).
+    Partial,
 }
 
 const NO_GROUP: u16 = u16::MAX;
@@ -371,28 +395,40 @@ impl Incremental {
         self.tiles.resize((self.tiles_w * self.tiles_h) as usize, 0);
 
         self.build_indices();
-        let mut scroll = self.detect_scroll();
-        self.match_prims(scroll);
-        if let Some((r, _)) = scroll {
-            // Décalage peu crédible (un seul élément a bougé, par exemple le fond de survol
-            // passé d'une ligne à une autre) : la plupart du contenu de la région est resté
-            // en place. Recopier coûterait plus que redessiner ce qui a changé.
+        self.detect_scrolls();
+        self.match_prims();
+        // Décalage peu crédible (un seul élément a bougé, par exemple le fond de survol passé
+        // d'une ligne à une autre) : la plupart du contenu de la région est resté en place.
+        // Recopier coûterait plus que redessiner ce qui a changé.
+        let mut dropped = false;
+        let mut k = 0;
+        while k < self.scrolls.len() {
+            let (r, _) = self.scrolls[k];
             let (mut moved, mut still) = (0u64, 0u64);
             for (p, m) in self.cur.prims.iter().zip(&self.matches) {
+                if !r.contains(&p.cov) {
+                    continue;
+                }
                 match m {
                     Match::Moved => moved += p.cov.area(),
-                    Match::Same if r.contains(&p.cov) => still += p.cov.area(),
-                    _ => {}
+                    Match::Same => still += p.cov.area(),
+                    Match::None => {}
                 }
             }
             if moved < still {
-                scroll = None;
-                self.match_prims(None);
+                self.scrolls.swap_remove(k);
+                dropped = true;
+            } else {
+                k += 1;
             }
+        }
+        if dropped {
+            self.match_prims();
         }
 
         let screen = self.screen();
-        if let Some((r, t)) = scroll {
+        for k in 0..self.scrolls.len() {
+            let (r, t) = self.scrolls[k];
             // Bande découverte par le décalage.
             let v = r.intersect(&r.translate_y(t));
             let exposed = if t < 0 {
@@ -402,8 +438,9 @@ impl Incremental {
             };
             self.mark(exposed);
         }
-        self.damage_unmatched(scroll);
-        if let Some((r, t)) = scroll {
+        self.damage_unmatched();
+        for k in 0..self.scrolls.len() {
+            let (r, t) = self.scrolls[k];
             for j in 0..self.cur.prims.len() {
                 let p = self.cur.prims[j];
                 if self.matches[j] == Match::Same && p.cov.intersects(&r) {
@@ -427,8 +464,17 @@ impl Incremental {
             &mut self.rects,
         );
         self.copy_rects.clear();
-        if let Some((r, t)) = scroll {
+        self.copy_spans.clear();
+        self.copy_union.clear();
+        self.copy_union.resize(self.tiles.len(), 0);
+        // Chaque région se recopie en elle-même (les régions sont disjointes) : leur ordre
+        // est indifférent.
+        for k in 0..self.scrolls.len() {
+            let (r, t) = self.scrolls[k];
             self.plan_copy(r, t);
+            for (u, c) in self.copy_union.iter_mut().zip(&self.copy_tiles) {
+                *u |= *c;
+            }
             extract_rects(
                 &self.copy_tiles,
                 tw,
@@ -436,27 +482,30 @@ impl Incremental {
                 screen,
                 &mut self.open,
                 &mut self.runs,
-                &mut self.copy_rects,
+                &mut self.region_rects,
             );
             let v = r.intersect(&r.translate_y(t));
-            for c in &mut self.copy_rects {
+            for c in &mut self.region_rects {
                 *c = c.intersect(&v);
             }
-            self.copy_rects.retain(|c| !c.is_empty());
+            self.region_rects.retain(|c| !c.is_empty());
             // Ordre de recopie : on lit à `y - t` ; ces lignes ne doivent pas avoir été
             // réécrites. Contenu qui monte (t < 0) : de haut en bas, sinon de bas en haut.
             if t < 0 {
-                self.copy_rects.sort_unstable_by_key(|c| c.y0);
+                self.region_rects.sort_unstable_by_key(|c| c.y0);
             } else {
-                self.copy_rects.sort_unstable_by_key(|c| -c.y1);
+                self.region_rects.sort_unstable_by_key(|c| -c.y1);
             }
+            let start = self.copy_rects.len();
+            self.copy_rects.extend_from_slice(&self.region_rects);
+            self.copy_spans.push((start, self.copy_rects.len(), t));
         }
         if self.rects.len() > MAX_RECTS {
             band_rects(&self.tiles, None, tw, th, screen, &mut self.rects);
         }
-        let copy = scroll.map(|_| self.copy_tiles.as_slice());
+        let copy = (!self.scrolls.is_empty()).then_some(self.copy_union.as_slice());
         band_rects(&self.tiles, copy, tw, th, screen, &mut self.present);
-        Plan::Partial { scroll }
+        Plan::Partial
     }
 
     /// Pixels à recopier. En dehors des zones endommagées, un pixel `p` de la zone décalée
@@ -503,16 +552,20 @@ impl Incremental {
                 self.report = DamageReport {
                     full: true,
                     scroll: None,
+                    scrolls: 0,
                     redrawn_px: screen.area(),
                     copied_px: 0,
+                    rects: 1,
                 };
             }
-            Plan::Partial { scroll } => {
+            Plan::Partial => {
                 self.report = DamageReport {
                     full: false,
-                    scroll: *scroll,
+                    scroll: self.scrolls.first().copied(),
+                    scrolls: self.scrolls.len(),
                     redrawn_px: self.rects.iter().map(DamageRect::area).sum(),
                     copied_px: self.copy_rects.iter().map(DamageRect::area).sum(),
+                    rects: self.rects.len(),
                 };
             }
         }
@@ -529,17 +582,20 @@ impl Incremental {
         self.rel_index.clear();
         for (i, p) in self.prev.prims.iter().enumerate() {
             self.abs_index.push((p.h_abs, i as u32));
-            self.rel_index.push((p.h_rel, i as u32));
+            self.rel_index.push((p.h_rel, p.qref[0], i as u32));
         }
-        // Tri par (empreinte, indice) : dans une plage d'empreinte, le premier indice
+        // Tri par (empreinte, [abscisse,] indice) : dans une plage, le premier indice
         // admissible est le plus petit.
         self.abs_index.sort_unstable();
         self.rel_index.sort_unstable();
     }
 
-    /// Translation verticale dominante parmi les primitives dont la découpe est restée en
-    /// place (contenu d'une zone de défilement), et cette découpe.
-    fn detect_scroll(&mut self) -> Option<(DamageRect, i32)> {
+    /// Régions qui défilent (`scrolls`) : découpes restées en place dont le contenu s'est
+    /// translaté verticalement d'un nombre entier de pixels (zone visible d'une liste), avec
+    /// le décalage dominant de chacune. Plusieurs listes peuvent défiler à la fois, chacune de
+    /// son propre décalage (fx : volets du multiview en défilement synchronisé). Régions
+    /// disjointes, au plus [`MAX_SCROLLS`], les plus couvertes d'abord.
+    fn detect_scrolls(&mut self) {
         // Translation entière verticale de `o` vers `n`, découpe fixe ou translatée avec le
         // contenu.
         let moved_by = |o: &PrimInfo, n: &PrimInfo| -> Option<i32> {
@@ -556,58 +612,98 @@ impl Incremental {
                 || (o.unclipped && n.unclipped);
             clip_ok.then_some(t)
         };
+        // Une primitive restée en place (même empreinte absolue) ne vote pas : sinon, quand
+        // rien ne défile, des icônes identiques suggéreraient un décalage d'une ligne.
+        let stayed = |abs: &[(u64, u32)], h: u64| {
+            let start = abs.partition_point(|e| e.0 < h);
+            abs.get(start).is_some_and(|e| e.0 == h)
+        };
+        self.scrolls.clear();
 
-        // 1. Le décalage. Des primitives identiques (icônes d'un même type, d'une ligne à
-        //    l'autre) ont plusieurs partenaires possibles : chacune répartit son poids (son
-        //    aire) entre eux, les primitives sans ambiguïté (noms) l'emportent. Une primitive
-        //    restée en place (même empreinte absolue) ne vote pas : sinon, quand rien ne
-        //    défile, ces icônes identiques suggéreraient un décalage d'une ligne.
-        self.votes.clear();
+        // 1. Régions candidates : découpes fixes où du contenu a bougé.
+        self.regions.clear();
         for n in &self.cur.prims {
-            let start = self.abs_index.partition_point(|e| e.0 < n.h_abs);
-            if self.abs_index.get(start).is_some_and(|e| e.0 == n.h_abs) {
+            if stayed(&self.abs_index, n.h_abs) {
                 continue;
             }
-            let k = candidates(&self.rel_index, n.h_rel)
+            for oi in candidates(&self.rel_index, n.h_rel, n.qref[0]) {
+                let o = &self.prev.prims[oi];
+                if o.iclip == n.iclip && moved_by(o, n).is_some() {
+                    match self.regions.iter_mut().find(|r| r.0 == n.iclip) {
+                        Some(r) => r.1 += n.cov.area(),
+                        None => self.regions.push((n.iclip, n.cov.area())),
+                    }
+                    break;
+                }
+            }
+        }
+        if self.regions.is_empty() {
+            return;
+        }
+
+        // 2. Le décalage de chaque région, voté par les primitives qu'elle contient (la plus
+        //    petite région qui les contient). Des primitives identiques (icônes d'un même
+        //    type, d'une ligne à l'autre) ont plusieurs partenaires possibles : chacune
+        //    répartit son poids (son aire) entre eux, les primitives sans ambiguïté (noms)
+        //    l'emportent.
+        self.region_votes.clear();
+        for n in &self.cur.prims {
+            if stayed(&self.abs_index, n.h_abs) {
+                continue;
+            }
+            let Some(g) = self
+                .regions
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.0.contains(&n.cov))
+                .min_by_key(|(_, r)| r.0.area())
+                .map(|(g, _)| g)
+            else {
+                continue;
+            };
+            let k = candidates(&self.rel_index, n.h_rel, n.qref[0])
                 .filter(|&oi| moved_by(&self.prev.prims[oi], n).is_some())
                 .count() as u64;
             if k == 0 {
                 continue;
             }
             let weight = n.cov.area() * 64 / k;
-            for oi in candidates(&self.rel_index, n.h_rel) {
+            for oi in candidates(&self.rel_index, n.h_rel, n.qref[0]) {
                 let Some(t) = moved_by(&self.prev.prims[oi], n) else {
                     continue;
                 };
-                match self.votes.iter_mut().find(|v| v.0 == t) {
+                match self.region_votes.iter_mut().find(|v| v.0 == g && v.1 == t) {
                     Some(v) => v.2 += weight,
-                    None => self.votes.push((t, DamageRect::EMPTY, weight)),
+                    None => self.region_votes.push((g, t, weight)),
                 }
             }
         }
-        let t = self.votes.iter().max_by_key(|v| v.2)?.0;
 
-        // 2. La région : la découpe restée en place la plus couverte par du contenu décalé
-        //    de `t` (la zone visible d'une liste qui défile).
+        // 3. Décalage dominant par région ; régions disjointes, les plus votées d'abord.
         self.votes.clear();
-        for n in &self.cur.prims {
-            for oi in candidates(&self.rel_index, n.h_rel) {
-                let o = &self.prev.prims[oi];
-                if o.iclip == n.iclip && moved_by(o, n) == Some(t) {
-                    match self.votes.iter_mut().find(|v| v.1 == n.iclip) {
-                        Some(v) => v.2 += n.cov.area(),
-                        None => self.votes.push((t, n.iclip, n.cov.area())),
-                    }
-                    break;
-                }
+        for (g, &(r, _)) in self.regions.iter().enumerate() {
+            let best = self
+                .region_votes
+                .iter()
+                .filter(|v| v.0 == g)
+                .max_by_key(|v| v.2);
+            if let Some(&(_, t, w)) = best
+                && t.abs() < r.height()
+            {
+                self.votes.push((t, r, w));
             }
         }
-        let r = self.votes.iter().max_by_key(|v| v.2)?.1;
-        (t.abs() < r.height()).then_some((r, t))
+        self.votes.sort_unstable_by_key(|v| core::cmp::Reverse(v.2));
+        for &(t, r, _) in &self.votes {
+            if self.scrolls.len() < MAX_SCROLLS && !self.scrolls.iter().any(|s| s.0.intersects(&r))
+            {
+                self.scrolls.push((r, t));
+            }
+        }
     }
 
     /// Appariement croissant (dans l'ordre de dessin) des primitives des deux images.
-    fn match_prims(&mut self, scroll: Option<(DamageRect, i32)>) {
+    fn match_prims(&mut self) {
         let n_new = self.cur.prims.len();
         self.matches.clear();
         self.matches.resize(n_new, Match::None);
@@ -633,12 +729,11 @@ impl Incremental {
                 }
             }
 
-            if let Some((r, t)) = scroll
-                && r.contains(&n.cov)
-            {
-                let start = self.rel_index.partition_point(|e| e.0 < n.h_rel);
-                for &(h, oi) in &self.rel_index[start..] {
-                    if h != n.h_rel || best.is_some_and(|b| oi >= b.0) {
+            if let Some((r, t)) = self.scrolls.iter().copied().find(|s| s.0.contains(&n.cov)) {
+                let key = (n.h_rel, n.qref[0]);
+                let start = self.rel_index.partition_point(|e| (e.0, e.1) < key);
+                for &(h, x, oi) in &self.rel_index[start..] {
+                    if (h, x) != key || best.is_some_and(|b| oi >= b.0) {
                         break;
                     }
                     if (oi as i64) <= last {
@@ -673,7 +768,7 @@ impl Incremental {
 
     /// Primitives sans partenaire : leurs triangles, dans l'image précédente (là où ils
     /// apparaissent après décalage) et dans la nouvelle.
-    fn damage_unmatched(&mut self, scroll: Option<(DamageRect, i32)>) {
+    fn damage_unmatched(&mut self) {
         let mut tiles = TileMarker {
             tiles: &mut self.tiles,
             w: self.tiles_w,
@@ -687,24 +782,24 @@ impl Incremental {
                 tiles.mark(b.intersect(&p.iclip));
             });
         }
-        let v = scroll.map(|(r, t)| (r, t, r.intersect(&r.translate_y(t))));
+        // Ancienne primitive disparue : endommagée là où elle était, et, pour sa part dans
+        // une région qui défile, là où la recopie l'amène.
+        let scrolls = &self.scrolls;
         for (i, p) in self.prev.prims.iter().enumerate() {
             if self.old_matches[i] != Match::None {
                 continue;
             }
             for_each_tri_rect(&self.prev.meshes[p.mesh as usize], |b| {
                 let b = b.intersect(&p.iclip);
-                match v {
-                    Some((r, t, v)) => {
-                        if !r.contains(&b) {
-                            tiles.mark(b);
-                        }
-                        let inside = b.intersect(&r);
-                        if !inside.is_empty() {
-                            tiles.mark(inside.translate_y(t).intersect(&v));
-                        }
+                if !scrolls.iter().any(|(r, _)| r.contains(&b)) {
+                    tiles.mark(b);
+                }
+                for &(r, t) in scrolls {
+                    let inside = b.intersect(&r);
+                    if !inside.is_empty() {
+                        let v = r.intersect(&r.translate_y(t));
+                        tiles.mark(inside.translate_y(t).intersect(&v));
                     }
-                    None => tiles.mark(b),
                 }
             });
         }
@@ -873,14 +968,16 @@ fn samples_dirty(dirty: &[(TextureId, Rect)], p: &PrimInfo) -> bool {
         .any(|(id, r)| *id == p.texture && r.intersects(p.uv))
 }
 
-/// Anciennes primitives de même empreinte relative que `h` (au plus `MAX_CANDIDATES`).
-fn candidates(rel_index: &[(u64, u32)], h: u64) -> impl Iterator<Item = usize> + '_ {
-    let start = rel_index.partition_point(|e| e.0 < h);
+/// Anciennes primitives de même empreinte relative que `h` et de même abscisse `x` (au plus
+/// `MAX_CANDIDATES`). Des icônes identiques, nombreuses (plusieurs volets sur des dossiers
+/// semblables), n'épuisent ainsi pas la limite avec des partenaires impossibles.
+fn candidates(rel_index: &[(u64, i32, u32)], h: u64, x: i32) -> impl Iterator<Item = usize> + '_ {
+    let start = rel_index.partition_point(|e| (e.0, e.1) < (h, x));
     rel_index[start..]
         .iter()
-        .take_while(move |e| e.0 == h)
+        .take_while(move |e| (e.0, e.1) == (h, x))
         .take(MAX_CANDIDATES)
-        .map(|e| e.1 as usize)
+        .map(|e| e.2 as usize)
 }
 
 /// Tuiles marquées → rectangles disjoints (plages par rangée, fusionnées verticalement quand

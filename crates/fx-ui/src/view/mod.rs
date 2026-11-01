@@ -59,6 +59,9 @@ pub(crate) struct Scroll {
     pub ensure: Option<usize>,
     /// Largeur utile de la vue (calcul des colonnes de la grille).
     pub width: f32,
+    /// Défilement synchronisé : écart (en points) qu'un autre volet du multiview a défilé et
+    /// que celui-ci doit suivre à sa prochaine image.
+    pub follow: f32,
 }
 
 /// Sélection rectangulaire en cours.
@@ -171,6 +174,9 @@ pub struct ViewState {
     pub(crate) disk_anchor: Option<egui::Rect>,
     pub(crate) disk_pick: Vec<std::path::PathBuf>,
     pub(crate) disk_pick_init: bool,
+    /// Défilement synchronisé : style de la fenêtre et sa copie où les barres des volets non
+    /// survolés prennent l'opacité de celle du volet survolé (cf. `pane::shared_bars`).
+    pub(crate) shared_bars: Option<(std::sync::Arc<egui::Style>, std::sync::Arc<egui::Style>)>,
 }
 
 impl ViewState {
@@ -231,6 +237,7 @@ impl ViewState {
             disk_anchor: None,
             disk_pick: Vec::new(),
             disk_pick_init: false,
+            shared_bars: None,
         }
     }
 
