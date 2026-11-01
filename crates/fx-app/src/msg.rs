@@ -21,10 +21,13 @@ use crate::upgrade::Status;
 pub enum Msg {
     /// Commande du registre (raccourci, barre d'outils, menu, palette).
     Command(CommandId),
-    /// Démarrage : ouvre `start` s'il est fourni, sinon restaure `session`.
+    /// Démarrage : ouvre `start` s'il est fourni, sinon restaure `session`. Avec
+    /// `start_in_new_tab` (dossier ouvert par une autre application), la session est
+    /// restaurée quand même et `start` s'ouvre dans un nouvel onglet, affiché.
     Startup {
         start: Option<PathBuf>,
         session: Option<fx_store::Session>,
+        start_in_new_tab: bool,
     },
 
     // --- Navigation et onglets ---

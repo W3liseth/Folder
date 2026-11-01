@@ -98,7 +98,8 @@ fn main() -> ExitCode {
     // Dossier ouvert par une autre application (folder gestionnaire de fichiers par défaut) :
     // nouvel onglet de la dernière fenêtre active, sinon nouvelle fenêtre sur ce dossier.
     let mut args_os = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if args_os.first().is_some_and(|a| a == fx_ui::OPEN_ARG) {
+    let open_folder = args_os.first().is_some_and(|a| a == fx_ui::OPEN_ARG);
+    if open_folder {
         let Some(path) = args_os.get(1).map(PathBuf::from) else {
             return ExitCode::from(2);
         };
@@ -117,6 +118,7 @@ fn main() -> ExitCode {
     };
     let opts = fx_ui::Options {
         start_dir: args.dir,
+        start_in_new_tab: open_folder,
         bench: args.bench,
         process_start,
         renderer: args.renderer.unwrap_or_else(Renderer::from_env),

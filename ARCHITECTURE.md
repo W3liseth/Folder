@@ -1100,7 +1100,9 @@ télémétrie distante.
   éphémère : fenêtre folder visible la plus haute dans l'ordre d'affichage (donc la dernière
   activée, même exécutable, `fx_win::window::last_active_for_exe`) ; il lui cède le premier
   plan et lui envoie `Remote::OpenFolder` par `WM_COPYDATA` (nouvel onglet, fenêtre ramenée
-  devant), sinon il devient une nouvelle fenêtre sur ce dossier. Limite : « Afficher dans le
+  devant). Sans fenêtre, il devient la fenêtre : session restaurée (si « Restaurer les
+  onglets » est actif) puis le dossier en dernier onglet, affiché (`Msg::Startup`,
+  `start_in_new_tab`) ; sinon le dossier seul. Limite : « Afficher dans le
   dossier » des navigateurs passe par `SHOpenFolderAndSelectItems`, qui ouvre le dossier sans
   transmettre l'élément à sélectionner. Un double-clic sur un dossier du Bureau ou d'une
   fenêtre de l'Explorateur ouvre aussi folder. `--restore-explorer` retire aussi ces clés.

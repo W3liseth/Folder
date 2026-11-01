@@ -83,6 +83,9 @@ impl Renderer {
 pub struct Options {
     /// Dossier ouvert au démarrage (sinon : session restaurée ou accueil).
     pub start_dir: Option<PathBuf>,
+    /// `start_dir` vient d'une autre application (`--open-folder`, aucune fenêtre ouverte) :
+    /// la session est restaurée et le dossier s'y ajoute en nouvel onglet.
+    pub start_in_new_tab: bool,
     /// Mode mesure : écrit des lignes `FX_BENCH` sur stdout (cf. `tools/memprobe`).
     pub bench: BenchMode,
     /// Instant le plus proche possible du lancement du processus.
@@ -338,6 +341,7 @@ impl Core {
         core.apply(Msg::Startup {
             start: opts.start_dir.clone(),
             session,
+            start_in_new_tab: opts.start_in_new_tab,
         });
         // Pas de mise à jour en mode mesure : aucun processus ni thread en plus.
         if core.last_update_check.is_some() && core.state.settings.auto_update {

@@ -124,6 +124,7 @@ fn startup_opens_home_and_loads_sidebar_data() {
         Msg::Startup {
             start: None,
             session: None,
+            start_in_new_tab: false,
         },
     );
     assert_eq!(s.pane().location(), &Location::Home);
@@ -502,6 +503,7 @@ fn default_file_manager_follows_settings_and_startup() {
             Msg::Startup {
                 start: None,
                 session: None,
+                start_in_new_tab: false,
             },
         )
     };
@@ -535,7 +537,8 @@ fn startup_ensures_win_e_helper_only_when_enabled() {
         &mut s,
         Msg::Startup {
             start: None,
-            session: None
+            session: None,
+            start_in_new_tab: false,
         }
     )));
     let mut s = state();
@@ -544,7 +547,8 @@ fn startup_ensures_win_e_helper_only_when_enabled() {
         &mut s,
         Msg::Startup {
             start: None,
-            session: None
+            session: None,
+            start_in_new_tab: false,
         }
     )));
 }
@@ -1137,6 +1141,7 @@ fn deleted_tagged_items_leave_the_tag_count() {
         Msg::Startup {
             start: None,
             session: None,
+            start_in_new_tab: false,
         },
     );
     assert!(
@@ -1228,6 +1233,7 @@ fn session_roundtrip_restores_tabs() {
         Msg::Startup {
             start: None,
             session: Some(session),
+            start_in_new_tab: false,
         },
     );
     assert_eq!(t.tab().panes.len(), 2);
@@ -1237,6 +1243,48 @@ fn session_roundtrip_restores_tabs() {
             .count(),
         2
     );
+}
+
+#[test]
+fn folder_opened_by_another_app_joins_the_restored_session() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    update(&mut s, Msg::OpenInNewTab(Location::Dir(r"C:\b".into())));
+    update(&mut s, Msg::SelectTab(0));
+    let session = s.session();
+    let start = |restore: bool| {
+        let mut t = state();
+        t.settings.restore_session = restore;
+        update(
+            &mut t,
+            Msg::Startup {
+                start: Some(r"C:\Téléchargements".into()),
+                session: Some(session.clone()),
+                start_in_new_tab: true,
+            },
+        );
+        t
+    };
+    let dirs = |t: &AppState| -> Vec<Location> {
+        t.tabs
+            .iter()
+            .map(|t| t.active_pane().location().clone())
+            .collect()
+    };
+    // Session restaurée, puis le dossier en dernier onglet, affiché.
+    let t = start(true);
+    assert_eq!(
+        dirs(&t),
+        [
+            Location::Dir(r"C:\a".into()),
+            Location::Dir(r"C:\b".into()),
+            Location::Dir(r"C:\Téléchargements".into())
+        ]
+    );
+    assert_eq!(t.active_tab, 2);
+    // Restauration désactivée : le dossier seul.
+    let t = start(false);
+    assert_eq!(dirs(&t), [Location::Dir(r"C:\Téléchargements".into())]);
 }
 
 #[test]
@@ -1357,6 +1405,7 @@ fn history_survives_restart() {
         Msg::Startup {
             start: None,
             session: Some(session),
+            start_in_new_tab: false,
         },
     );
     assert!(r.pane().history.can_go_back() && r.pane().history.can_go_forward());

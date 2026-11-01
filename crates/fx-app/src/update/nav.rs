@@ -18,6 +18,7 @@ pub fn startup(
     state: &mut AppState,
     start: Option<PathBuf>,
     session: Option<Session>,
+    start_in_new_tab: bool,
 ) -> Vec<Effect> {
     let mut fx = vec![
         Effect::LoadDrives,
@@ -36,39 +37,18 @@ pub fn startup(
     if !state.tags.is_empty() {
         fx.push(Effect::CheckTagged(state.tags.paths()));
     }
-    let restore =
-        session.filter(|s| state.settings.restore_session && !s.tabs.is_empty() && start.is_none());
+    // Un dossier ouvert par une autre application (folder fermé) n'empêche pas la session
+    // de revenir : il s'y ajoute en dernier onglet, comme quand une fenêtre est ouverte.
+    let restore = session.filter(|s| {
+        state.settings.restore_session
+            && !s.tabs.is_empty()
+            && (start.is_none() || start_in_new_tab)
+    });
     match restore {
         Some(sess) => {
-            state.tabs.clear();
-            for t in &sess.tabs {
-                let loc = t
-                    .left
-                    .path
-                    .clone()
-                    .map_or(Location::Home, Location::from_path);
-                let mut tab = state.new_tab(loc.clone());
-                tab.panes[0].layout = t.left.layout;
-                tab.panes[0].history = History::restored(loc, &t.left.back, &t.left.forward);
-                if let Some(r) = &t.right {
-                    let loc = r.path.clone().map_or(Location::Home, Location::from_path);
-                    let mut p = state.new_pane(loc.clone());
-                    p.layout = r.layout;
-                    p.history = History::restored(loc, &r.back, &r.forward);
-                    tab.panes.push(p);
-                }
-                state.tabs.push(tab);
-            }
-            state.active_tab = sess.active.min(state.tabs.len() - 1);
-            // Charge le contenu de tous les volets (les onglets inactifs aussi : bascule instantanée).
-            let panes: Vec<(PaneId, Location)> = state
-                .tabs
-                .iter()
-                .flat_map(|t| &t.panes)
-                .map(|p| (p.id, p.location().clone()))
-                .collect();
-            for (id, loc) in panes {
-                fx.extend(load(state, id, loc, false));
+            fx.extend(restore_session(state, &sess));
+            if let Some(dir) = start {
+                fx.extend(open_tab(state, Location::from_path(dir)));
             }
         }
         None => {
@@ -77,6 +57,42 @@ pub fn startup(
             let loc = start.map_or(Location::Home, Location::from_path);
             fx.extend(load(state, id, loc, false));
         }
+    }
+    fx
+}
+
+/// Remplace les onglets par ceux de la session et charge tous leurs volets (les onglets
+/// inactifs aussi : bascule instantanée).
+fn restore_session(state: &mut AppState, sess: &Session) -> Vec<Effect> {
+    state.tabs.clear();
+    for t in &sess.tabs {
+        let loc = t
+            .left
+            .path
+            .clone()
+            .map_or(Location::Home, Location::from_path);
+        let mut tab = state.new_tab(loc.clone());
+        tab.panes[0].layout = t.left.layout;
+        tab.panes[0].history = History::restored(loc, &t.left.back, &t.left.forward);
+        if let Some(r) = &t.right {
+            let loc = r.path.clone().map_or(Location::Home, Location::from_path);
+            let mut p = state.new_pane(loc.clone());
+            p.layout = r.layout;
+            p.history = History::restored(loc, &r.back, &r.forward);
+            tab.panes.push(p);
+        }
+        state.tabs.push(tab);
+    }
+    state.active_tab = sess.active.min(state.tabs.len() - 1);
+    let panes: Vec<(PaneId, Location)> = state
+        .tabs
+        .iter()
+        .flat_map(|t| &t.panes)
+        .map(|p| (p.id, p.location().clone()))
+        .collect();
+    let mut fx = Vec::new();
+    for (id, loc) in panes {
+        fx.extend(load(state, id, loc, false));
     }
     fx
 }

@@ -5,6 +5,13 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.11.1 — 2026-11-01
+
+- « Ouvrir les dossiers dans folder » : quand folder est fermé, un dossier ouvert depuis
+  une autre application (« Afficher dans le dossier » d'un navigateur…) rouvre la dernière
+  session avec tous ses onglets, puis ce dossier dans un nouvel onglet, affiché. Si
+  « Restaurer les onglets au démarrage » est désactivé, le dossier s'ouvre seul.
+
 ## 0.11.0 — 2026-11-01
 
 - Nouvelle option « Ouvrir les dossiers dans folder » (Paramètres › Raccourcis › Système) :

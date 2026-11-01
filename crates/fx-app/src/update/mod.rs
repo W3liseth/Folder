@@ -22,7 +22,11 @@ pub use nav::sort_indicator;
 pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Command(id) => commands::run(state, id),
-        Msg::Startup { start, session } => nav::startup(state, start, session),
+        Msg::Startup {
+            start,
+            session,
+            start_in_new_tab,
+        } => nav::startup(state, start, session, start_in_new_tab),
 
         Msg::Navigate(loc) => {
             let id = state.pane().id;
