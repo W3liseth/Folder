@@ -17,6 +17,17 @@
 //!   carte, ombres de bord du défilement), les zones qui ne sont pas invariantes par
 //!   translation verticale (bords des aplats, triangles non unis).
 //!
+//! - **Déplacements annoncés** : l'application peut signaler une région déplacée en bloc
+//!   ([`MovedRegion`], volet du multiview qui glisse). Ses pixels sont recopiés à la nouvelle
+//!   place ; ses primitives sont appariées translatées du même décalage (horizontal ou
+//!   vertical, découpe translatée avec elles). Les sources sont toutes lues avant d'écrire
+//!   (deux volets qui se croisent) ; un pixel couvert par plusieurs destinations prend la
+//!   dernière annoncée, seule responsable de son exactitude. Tout ce qui n'est pas vérifié
+//!   ainsi (primitives d'autres régions qui la recouvrent, sauf sous un aplat opaque de la
+//!   région dessiné après elles, ancienne place découverte, primitives fixes non invariantes
+//!   par la translation) est endommagé : une annonce fausse ne coûte que du temps, jamais
+//!   l'exactitude.
+//!
 //! Chaque zone endommagée est redessinée en entier (toutes les primitives qui la touchent,
 //! découpées au rectangle, du fond vers le dessus) : en dehors des zones endommagées, le
 //! contenu du tampon (éventuellement décalé) est celui qu'aurait produit un rendu complet.
@@ -50,6 +61,36 @@ const MAX_CANDIDATES: usize = 64;
 /// Régions qui défilent dans une même image, au plus (fx : une liste par volet du
 /// multiview, que le défilement synchronisé fait défiler ensemble).
 const MAX_SCROLLS: usize = 8;
+/// Régions déplacées annoncées par image, au plus (fx : volets du multiview).
+pub const MAX_MOVES: usize = 8;
+const NO_MOVE: u8 = u8::MAX;
+
+/// Portage fx : région dont le contenu de l'image précédente, en `from` (points), se retrouve
+/// tel quel décalé de `delta` (points, nombre entier de pixels, éventuellement nul) dans la
+/// nouvelle image : volet du multiview qui glisse vers sa nouvelle place. Ses primitives sont
+/// appariées à part, dans leur propre ordre de dessin. Cf. `set_moved_regions`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MovedRegion {
+    pub from: Rect,
+    pub delta: Vec2,
+}
+
+impl MovedRegion {
+    pub const NONE: Self = Self {
+        from: Rect::NOTHING,
+        delta: Vec2::ZERO,
+    };
+}
+
+/// Région déplacée, en pixels : ancienne place (sur l'écran), destination et source de la
+/// recopie (`dst - t`), décalage.
+#[derive(Clone, Copy)]
+struct Move {
+    old: DamageRect,
+    src: DamageRect,
+    dst: DamageRect,
+    t: [i32; 2],
+}
 
 /// Rectangle de pixels `[x0, x1) × [y0, y1)`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -115,6 +156,39 @@ impl DamageRect {
         }
     }
 
+    pub(crate) fn translate(&self, t: [i32; 2]) -> Self {
+        Self {
+            x0: self.x0 + t[0],
+            y0: self.y0 + t[1],
+            x1: self.x1 + t[0],
+            y1: self.y1 + t[1],
+        }
+    }
+
+    /// `self` privé de `o` : au plus quatre rectangles disjoints.
+    pub(crate) fn subtract(&self, o: &Self) -> [Self; 4] {
+        let i = self.intersect(o);
+        if i.is_empty() {
+            return [*self, Self::EMPTY, Self::EMPTY, Self::EMPTY];
+        }
+        [
+            Self { y1: i.y0, ..*self },
+            Self { y0: i.y1, ..*self },
+            Self {
+                y0: i.y0,
+                y1: i.y1,
+                x1: i.x0,
+                ..*self
+            },
+            Self {
+                y0: i.y0,
+                y1: i.y1,
+                x0: i.x1,
+                ..*self
+            },
+        ]
+    }
+
     pub(crate) fn translate_y(&self, t: i32) -> Self {
         Self {
             y0: self.y0 + t,
@@ -157,6 +231,8 @@ pub struct DamageReport {
     pub scroll: Option<(DamageRect, i32)>,
     /// Régions décalées, chacune de son propre décalage.
     pub scrolls: usize,
+    /// Régions déplacées (annoncées par l'application) recopiées.
+    pub moves: usize,
     /// Pixels rasterisés (somme des rectangles redessinés).
     pub redrawn_px: u64,
     /// Pixels recopiés par le décalage.
@@ -240,6 +316,16 @@ pub(crate) struct Incremental {
     votes: Vec<(i32, DamageRect, u64)>,
     /// Régions qui défilent à cette image et leur décalage (disjointes).
     scrolls: Vec<(DamageRect, i32)>,
+    /// Régions déplacées annoncées pour cette image.
+    moves: Vec<Move>,
+    /// Région déplacée à laquelle chaque primitive (nouvelle, ancienne) est appariée.
+    match_move: Vec<u8>,
+    old_move: Vec<u8>,
+    /// Partenaire (ancienne primitive) de chaque nouvelle primitive appariée.
+    partner: Vec<u32>,
+    /// Par tuile : 1 + dernière région déplacée dont la destination la couvre entièrement
+    /// (0 : aucune). Cette région écrit la tuile en dernier et répond seule de ses pixels.
+    owner: Vec<u8>,
     /// Découpes candidates au défilement (aire du contenu qui y a bougé).
     regions: Vec<(DamageRect, u64)>,
     /// Votes (région candidate, décalage, poids).
@@ -267,6 +353,8 @@ pub(crate) struct Incremental {
     pub copy_rects: Vec<DamageRect>,
     /// Plages de `copy_rects` par région, et leur décalage.
     pub copy_spans: Vec<(usize, usize, i32)>,
+    /// Recopies des régions déplacées (destination, décalage), dans l'ordre.
+    pub move_copies: Vec<(DamageRect, [i32; 2])>,
     /// Rectangles à présenter (redessinés et recopiés).
     pub present: Vec<DamageRect>,
     pub report: DamageReport,
@@ -378,6 +466,7 @@ impl Incremental {
         &mut self,
         reuse_previous: bool,
         dirty_textures: impl Iterator<Item = (TextureId, Rect)>,
+        moved: &[MovedRegion],
     ) -> Plan {
         let same_target = self.prev.width == self.cur.width
             && self.prev.height == self.cur.height
@@ -396,6 +485,7 @@ impl Incremental {
 
         self.build_indices();
         self.detect_scrolls();
+        self.take_moves(moved);
         self.match_prims();
         // Décalage peu crédible (un seul élément a bougé, par exemple le fond de survol passé
         // d'une ligne à une autre) : la plupart du contenu de la région est resté en place.
@@ -441,13 +531,15 @@ impl Incremental {
         self.damage_unmatched();
         for k in 0..self.scrolls.len() {
             let (r, t) = self.scrolls[k];
+            let v = r.intersect(&r.translate_y(t));
             for j in 0..self.cur.prims.len() {
                 let p = self.cur.prims[j];
                 if self.matches[j] == Match::Same && p.cov.intersects(&r) {
-                    self.damage_static(j, r, t);
+                    self.damage_static(j, r, v, [0, t], false);
                 }
             }
         }
+        self.damage_moves();
 
         let dirty = self.tiles.iter().filter(|&&d| d != 0).count();
         if dirty as f32 > FULL_REDRAW_RATIO * self.tiles.len() as f32 {
@@ -467,6 +559,7 @@ impl Incremental {
         self.copy_spans.clear();
         self.copy_union.clear();
         self.copy_union.resize(self.tiles.len(), 0);
+        self.plan_move_copies();
         // Chaque région se recopie en elle-même (les régions sont disjointes) : leur ordre
         // est indifférent.
         for k in 0..self.scrolls.len() {
@@ -503,7 +596,8 @@ impl Incremental {
         if self.rects.len() > MAX_RECTS {
             band_rects(&self.tiles, None, tw, th, screen, &mut self.rects);
         }
-        let copy = (!self.scrolls.is_empty()).then_some(self.copy_union.as_slice());
+        let copy = (!self.scrolls.is_empty() || !self.moves.is_empty())
+            .then_some(self.copy_union.as_slice());
         band_rects(&self.tiles, copy, tw, th, screen, &mut self.present);
         Plan::Partial
     }
@@ -539,6 +633,109 @@ impl Incremental {
         }
     }
 
+    /// Recopies des régions déplacées, dans l'ordre des annonces. Un pixel `q` de la
+    /// destination garde sa valeur si l'image précédente y était déjà la même qu'en `q - t` :
+    /// seules les primitives non fixes (déplacées, disparues) qui couvraient `q` ou `q - t` le
+    /// font changer ; l'intérieur de l'aplat opaque de la région, présent aux deux places, ne
+    /// le change pas (fond uni entre les lignes d'une liste). Une région n'écrit pas dans la
+    /// destination d'une région suivante : celle-ci répond seule de ces pixels.
+    fn plan_move_copies(&mut self) {
+        self.move_copies.clear();
+        let (tw, th) = (self.tiles_w, self.tiles_h);
+        let screen = self.screen();
+        for k in 0..self.moves.len() {
+            let m = self.moves[k];
+            if m.t == [0, 0] {
+                continue;
+            }
+            let occ = occluder(&self.prev, &self.old_move, k);
+            // Intérieur de l'aplat aux deux places (coordonnées de la nouvelle image).
+            let still = occ.map_or(DamageRect::EMPTY, |(o, _)| {
+                o.translate(m.t).intersect(&o).intersect(&m.dst)
+            });
+            self.copy_tiles.clear();
+            self.copy_tiles.resize(self.tiles.len(), 0);
+            let mut copy = TileMarker {
+                tiles: &mut self.copy_tiles,
+                w: tw,
+                h: th,
+            };
+            for (i, o) in self.prev.prims.iter().enumerate() {
+                if self.old_matches[i] == Match::Same
+                    || !(o.cov.intersects(&m.dst) || o.cov.intersects(&m.src))
+                {
+                    continue;
+                }
+                let here = o.cov.intersect(&m.dst);
+                let there = o.cov.intersect(&m.src).translate(m.t).intersect(&m.dst);
+                if occ.is_some_and(|(_, at)| at == i) {
+                    for r in [here, there] {
+                        for piece in r.subtract(&still) {
+                            copy.mark(piece);
+                        }
+                    }
+                } else {
+                    copy.mark(here);
+                    copy.mark(there);
+                }
+            }
+            // Les tuiles endommagées seront redessinées : inutile d'y recopier.
+            for (c, d) in self.copy_tiles.iter_mut().zip(&self.tiles) {
+                *c &= !*d;
+            }
+            extract_rects(
+                &self.copy_tiles,
+                tw,
+                th,
+                screen,
+                &mut self.open,
+                &mut self.runs,
+                &mut self.region_rects,
+            );
+            let first = self.move_copies.len();
+            for r in &self.region_rects {
+                let r = r.intersect(&m.dst);
+                // Sans les destinations des régions suivantes (au plus 4 morceaux chacune).
+                let mut pieces = [DamageRect::EMPTY; 64];
+                let mut n = 1;
+                pieces[0] = r;
+                for later in &self.moves[k + 1..] {
+                    let mut next = [DamageRect::EMPTY; 64];
+                    let mut c = 0;
+                    for p in &pieces[..n] {
+                        for q in p.subtract(&later.dst) {
+                            if !q.is_empty() && c < next.len() {
+                                next[c] = q;
+                                c += 1;
+                            }
+                        }
+                    }
+                    pieces = next;
+                    n = c;
+                }
+                for p in &pieces[..n] {
+                    if !p.is_empty() {
+                        self.move_copies.push((*p, m.t));
+                        TileMarker {
+                            tiles: &mut self.copy_union,
+                            w: tw,
+                            h: th,
+                        }
+                        .mark(*p);
+                    }
+                }
+            }
+            // Ordre de recopie dans la région : d'abord ce qui est le plus loin dans le sens du
+            // déplacement, dont la source n'est alors pas encore réécrite (recopie directe).
+            let t = m.t;
+            self.move_copies[first..].sort_unstable_by_key(|(r, _)| {
+                let y = if t[1] > 0 { -r.y1 } else { r.y0 };
+                let x = if t[0] > 0 { -r.x1 } else { r.x0 };
+                if t[1] != 0 { (y, x) } else { (x, y) }
+            });
+        }
+    }
+
     /// Après le rendu : l'image courante devient la référence de la suivante.
     pub fn finish(&mut self, plan: &Plan) {
         let screen = self.screen();
@@ -547,12 +744,14 @@ impl Incremental {
                 self.rects.clear();
                 self.rects.push(screen);
                 self.copy_rects.clear();
+                self.move_copies.clear();
                 self.present.clear();
                 self.present.push(screen);
                 self.report = DamageReport {
                     full: true,
                     scroll: None,
                     scrolls: 0,
+                    moves: 0,
                     redrawn_px: screen.area(),
                     copied_px: 0,
                     rects: 1,
@@ -563,8 +762,10 @@ impl Incremental {
                     full: false,
                     scroll: self.scrolls.first().copied(),
                     scrolls: self.scrolls.len(),
+                    moves: self.move_copies.len(),
                     redrawn_px: self.rects.iter().map(DamageRect::area).sum(),
-                    copied_px: self.copy_rects.iter().map(DamageRect::area).sum(),
+                    copied_px: self.copy_rects.iter().map(DamageRect::area).sum::<u64>()
+                        + self.move_copies.iter().map(|m| m.0.area()).sum::<u64>(),
                     rects: self.rects.len(),
                 };
             }
@@ -709,34 +910,77 @@ impl Incremental {
         self.matches.resize(n_new, Match::None);
         self.old_matches.clear();
         self.old_matches.resize(self.prev.prims.len(), Match::None);
+        self.match_move.clear();
+        self.match_move.resize(n_new, NO_MOVE);
+        self.old_move.clear();
+        self.old_move.resize(self.prev.prims.len(), NO_MOVE);
+        self.partner.clear();
+        self.partner.resize(n_new, u32::MAX);
 
+        // Appariement croissant, mais pour chaque région déplacée à part : l'ordre de dessin
+        // des volets peut changer d'une image à l'autre (début et fin d'un glissement). Là où
+        // l'ordre entre une région et autre chose compte (pixels communs), `damage_moves`
+        // endommage.
         let mut last: i64 = -1;
+        let mut last_move = [-1i64; MAX_MOVES];
         for j in 0..n_new {
             let n = self.cur.prims[j];
             if samples_dirty(&self.dirty_textures, &n) {
                 continue;
             }
             let mut best: Option<(u32, Match)> = None;
+            let mut best_move = NO_MOVE;
+
+            // Dans une région déplacée : d'abord la même primitive à l'ancienne place (une
+            // primitive identique laissée là par une autre, apparemment fixe, couperait
+            // l'appariement croissant).
+            // Régions qui se chevauchent (volets qui se croisent) : chacune est essayée.
+            for k in 0..self.moves.len() {
+                let m = self.moves[k];
+                if best.is_some() || !m.dst.contains(&n.cov) {
+                    continue;
+                }
+                let key = (n.h_rel, n.qref[0] - m.t[0] * SUBPIX as i32);
+                let start = self.rel_index.partition_point(|e| (e.0, e.1) < key);
+                for &(h, x, oi) in &self.rel_index[start..] {
+                    if (h, x) != key {
+                        break;
+                    }
+                    if (oi as i64) <= last_move[k] || self.old_matches[oi as usize] != Match::None {
+                        continue;
+                    }
+                    let o = &self.prev.prims[oi as usize];
+                    let moved = o.qref[1] + m.t[1] * SUBPIX as i32 == n.qref[1];
+                    let clip_ok = o.iclip.translate(m.t) == n.iclip || (o.unclipped && n.unclipped);
+                    if moved && clip_ok && m.src.contains(&o.cov) {
+                        best = Some((oi, Match::Moved));
+                        best_move = k as u8;
+                        break;
+                    }
+                }
+            }
 
             let start = self.abs_index.partition_point(|e| e.0 < n.h_abs);
             for &(h, oi) in &self.abs_index[start..] {
-                if h != n.h_abs {
+                if h != n.h_abs || best.is_some() {
                     break;
                 }
-                if (oi as i64) > last {
+                if (oi as i64) > last && self.old_matches[oi as usize] == Match::None {
                     best = Some((oi, Match::Same));
                     break;
                 }
             }
 
-            if let Some((r, t)) = self.scrolls.iter().copied().find(|s| s.0.contains(&n.cov)) {
+            if best_move == NO_MOVE
+                && let Some((r, t)) = self.scrolls.iter().copied().find(|s| s.0.contains(&n.cov))
+            {
                 let key = (n.h_rel, n.qref[0]);
                 let start = self.rel_index.partition_point(|e| (e.0, e.1) < key);
                 for &(h, x, oi) in &self.rel_index[start..] {
                     if (h, x) != key || best.is_some_and(|b| oi >= b.0) {
                         break;
                     }
-                    if (oi as i64) <= last {
+                    if (oi as i64) <= last || self.old_matches[oi as usize] != Match::None {
                         continue;
                     }
                     let o = &self.prev.prims[oi as usize];
@@ -761,7 +1005,14 @@ impl Incremental {
                 }
                 self.matches[j] = kind;
                 self.old_matches[oi as usize] = kind;
-                last = oi as i64;
+                self.match_move[j] = best_move;
+                self.old_move[oi as usize] = best_move;
+                self.partner[j] = oi;
+                if best_move == NO_MOVE {
+                    last = oi as i64;
+                } else {
+                    last_move[best_move as usize] = oi as i64;
+                }
             }
         }
     }
@@ -785,6 +1036,7 @@ impl Incremental {
         // Ancienne primitive disparue : endommagée là où elle était, et, pour sa part dans
         // une région qui défile, là où la recopie l'amène.
         let scrolls = &self.scrolls;
+        let moves = &self.moves;
         for (i, p) in self.prev.prims.iter().enumerate() {
             if self.old_matches[i] != Match::None {
                 continue;
@@ -801,22 +1053,34 @@ impl Incremental {
                         tiles.mark(inside.translate_y(t).intersect(&v));
                     }
                 }
+                for m in moves {
+                    tiles.mark(b.intersect(&m.src).translate(m.t).intersect(&m.dst));
+                }
             });
         }
     }
 
-    /// Primitive identique dans les deux images qui recouvre la région décalée : son rendu en
-    /// `p` (nouvelle image) doit égaler son rendu en `p - t` (pixels recopiés). C'est le cas à
-    /// l'intérieur d'un aplat uni ; on endommage les bords d'aplats et les triangles non unis.
-    fn damage_static(&mut self, j: usize, r: DamageRect, t: i32) {
+    /// Primitive identique dans les deux images qui recouvre une zone recopiée (pixels `v`,
+    /// lus en `v - t`, dans la source `r`) : son rendu en `p` (nouvelle image) doit égaler son
+    /// rendu en `p - t` (pixels recopiés). C'est le cas à l'intérieur d'un aplat uni ; on
+    /// endommage les bords d'aplats et les triangles non unis. `strict_clip` : une découpe qui
+    /// ne contient pas toute la zone en est un bord (régions déplacées).
+    fn damage_static(
+        &mut self,
+        j: usize,
+        r: DamageRect,
+        v: DamageRect,
+        t: [i32; 2],
+        strict_clip: bool,
+    ) {
         let p = self.cur.prims[j];
         let mesh = &self.cur.meshes[p.mesh as usize];
-        let v = r.intersect(&r.translate_y(t));
+        let hull = r.hull(&v);
         let reach = DamageRect {
-            x0: r.x0 - 2,
-            y0: r.y0 - 2 - t.abs(),
-            x1: r.x1 + 2,
-            y1: r.y1 + 2 + t.abs(),
+            x0: hull.x0 - 2 - t[0].abs(),
+            y0: hull.y0 - 2 - t[1].abs(),
+            x1: hull.x1 + 2 + t[0].abs(),
+            y1: hull.y1 + 2 + t[1].abs(),
         }
         .to_rect();
         let mut tiles = TileMarker {
@@ -824,6 +1088,11 @@ impl Incremental {
             w: self.tiles_w,
             h: self.tiles_h,
         };
+        if strict_clip && !(p.iclip.contains(&r) && p.iclip.contains(&v)) {
+            tiles.mark(p.cov.intersect(&v));
+            tiles.mark(p.cov.intersect(&r).translate(t).intersect(&v));
+            return;
+        }
 
         // 1. Triangles proches de R, groupés par couleur unie.
         let n_tris = mesh.indices.len() / 3;
@@ -900,7 +1169,7 @@ impl Incremental {
                 let (min, max) = tri_bounds(a.pos, b.pos, c.pos);
                 let bb = DamageRect::around(min, max).intersect(&p.iclip);
                 tiles.mark(bb.intersect(&v));
-                tiles.mark(bb.intersect(&r).translate_y(t).intersect(&v));
+                tiles.mark(bb.intersect(&r).translate(t).intersect(&v));
                 continue;
             }
             let ids = tri_indices(mesh, k);
@@ -916,7 +1185,7 @@ impl Incremental {
         }
 
         // 3. Aplats unis : seuls leurs bords (arêtes non partagées par deux triangles de part
-        //    et d'autre) changent sous une translation verticale.
+        //    et d'autre) changent sous la translation.
         self.edges.sort_unstable_by_key(|e| (e.group, e.a, e.b));
         let mut i = 0;
         while i < self.edges.len() {
@@ -948,6 +1217,136 @@ impl Incremental {
                 }
             }
             i += n;
+        }
+    }
+
+    /// Régions déplacées annoncées (en pixels), sans décalage nul ; les défilements qui les
+    /// touchent sont abandonnés (une zone n'est recopiée que d'une façon).
+    fn take_moves(&mut self, moved: &[MovedRegion]) {
+        self.moves.clear();
+        let screen = self.screen();
+        let ppp = self.cur.ppp;
+        for m in moved.iter().take(MAX_MOVES) {
+            let t = [
+                sat_i32((m.delta.x * ppp).round()),
+                sat_i32((m.delta.y * ppp).round()),
+            ];
+            // Décalage nul accepté : la région garde son propre appariement (ordre de dessin
+            // changé au début ou à la fin d'un glissement), sans rien recopier.
+            if !m.from.is_positive() {
+                continue;
+            }
+            let old = DamageRect {
+                x0: sat_i32((m.from.min.x * ppp).floor()),
+                y0: sat_i32((m.from.min.y * ppp).floor()),
+                x1: sat_i32((m.from.max.x * ppp).ceil()),
+                y1: sat_i32((m.from.max.y * ppp).ceil()),
+            }
+            .intersect(&screen);
+            let dst = old.translate(t).intersect(&screen);
+            if dst.is_empty() {
+                continue;
+            }
+            let src = dst.translate([-t[0], -t[1]]);
+            self.moves.push(Move { old, src, dst, t });
+        }
+        let moves = &self.moves;
+        self.scrolls.retain(|(r, _)| {
+            !moves
+                .iter()
+                .any(|m| r.intersects(&m.old) || r.intersects(&m.dst))
+        });
+    }
+
+    /// Régions déplacées : endommage ce que la recopie ne peut pas rendre juste.
+    fn damage_moves(&mut self) {
+        if self.moves.is_empty() {
+            return;
+        }
+        let (w, h) = (self.tiles_w, self.tiles_h);
+        self.owner.clear();
+        self.owner.resize(self.tiles.len(), 0);
+        for (k, m) in self.moves.iter().enumerate() {
+            let d = m.dst;
+            let (tx0, ty0) = ((d.x0 + TILE_W - 1) / TILE_W, (d.y0 + TILE_H - 1) / TILE_H);
+            let (tx1, ty1) = ((d.x1 / TILE_W).min(w), (d.y1 / TILE_H).min(h));
+            for ty in ty0..ty1 {
+                for tx in tx0..tx1 {
+                    self.owner[(ty * w + tx) as usize] = k as u8 + 1;
+                }
+            }
+        }
+        let mut tiles = OwnedMarker {
+            tiles: &mut self.tiles,
+            owner: &self.owner,
+            w,
+            h,
+        };
+        let moves = &self.moves;
+        let cur = &self.cur;
+        let prev = &self.prev;
+        for (k, m) in moves.iter().enumerate() {
+            // Ancienne place que le contenu quitte (sauf là où une recopie écrit).
+            for r in m.old.subtract(&m.dst) {
+                tiles.mark_unowned(r);
+            }
+            // Aplat opaque de la région (fond de la carte), dans les deux images : ce qui est
+            // dessiné avant lui, dessous, ne compte pas.
+            let new_occ = occluder(cur, &self.match_move, k);
+            let old_occ = occluder(prev, &self.old_move, k);
+            // Primitives d'une autre région (déplacée ou qui défile) qui recouvrent la
+            // destination, ou recouvraient la source.
+            for (j, p) in cur.prims.iter().enumerate() {
+                if self.matches[j] != Match::Moved || self.match_move[j] as usize == k {
+                    continue;
+                }
+                let r = p.cov.intersect(&m.dst);
+                match new_occ {
+                    Some((o, at)) if j < at => {
+                        for piece in r.subtract(&o) {
+                            tiles.mark_for(k, piece);
+                        }
+                    }
+                    _ => tiles.mark_for(k, r),
+                }
+            }
+            for (i, o) in prev.prims.iter().enumerate() {
+                if self.old_matches[i] != Match::Moved || self.old_move[i] as usize == k {
+                    continue;
+                }
+                let r = o.cov.intersect(&m.src);
+                match old_occ {
+                    Some((occ, at)) if i < at => {
+                        for piece in r.subtract(&occ) {
+                            tiles.mark_for(k, piece.translate(m.t).intersect(&m.dst));
+                        }
+                    }
+                    _ => tiles.mark_for(k, r.translate(m.t).intersect(&m.dst)),
+                }
+            }
+        }
+        // Primitives fixes : invariantes par la translation, sinon endommagées. Seules celles
+        // dessinées avant la région dans les deux images gardent leur place dans l'ordre de
+        // dessin (l'appariement de la région est indépendant du leur).
+        for k in 0..self.moves.len() {
+            let m = self.moves[k];
+            let first_new = self.match_move.iter().position(|&x| x as usize == k);
+            let first_old = self.old_move.iter().position(|&x| x as usize == k);
+            for j in 0..self.cur.prims.len() {
+                let p = self.cur.prims[j];
+                if self.matches[j] != Match::Same
+                    || !(p.cov.intersects(&m.dst) || p.cov.intersects(&m.src))
+                {
+                    continue;
+                }
+                let i = self.partner[j] as usize;
+                if first_new.is_some_and(|f| j > f) || first_old.is_some_and(|f| i > f) {
+                    self.mark(p.cov.intersect(&m.dst));
+                    self.mark(p.cov.intersect(&m.src).translate(m.t).intersect(&m.dst));
+                } else {
+                    self.damage_static(j, m.src, m.dst, m.t, true);
+                }
+            }
         }
     }
 
@@ -1072,6 +1471,102 @@ fn band_rects(
     }
 }
 
+/// Plus grand aplat opaque (rectangle uni, aligné sur les axes : deux triangles consécutifs
+/// sur quatre sommets) des primitives appariées à la région déplacée `k` dans l'image `f` :
+/// pixels qu'il couvre sûrement et rang de sa primitive dans l'ordre de dessin. egui fusionne
+/// les formes de même découpe en un seul maillage : l'aplat est cherché triangle par
+/// triangle.
+fn occluder(f: &Frame, moves: &[u8], k: usize) -> Option<(DamageRect, usize)> {
+    let mut best: Option<(DamageRect, usize)> = None;
+    for (j, p) in f.prims.iter().enumerate() {
+        if moves.get(j).copied() != Some(k as u8) || p.texture != TextureId::default() {
+            continue;
+        }
+        let mesh = &f.meshes[p.mesh as usize];
+        let n_tris = mesh.indices.len() / 3;
+        for t in 0..n_tris.saturating_sub(1) {
+            let [a, b, c] = tri(mesh, t);
+            let [d, e, g] = tri(mesh, t + 1);
+            let vs = [a, b, c, d, e, g];
+            if a.color.a() != 255 || vs.iter().any(|v| v.color != a.color || v.uv != a.uv) {
+                continue;
+            }
+            let (mut min, mut max) = (a.pos, a.pos);
+            for v in &vs {
+                min = min.min(v.pos);
+                max = max.max(v.pos);
+            }
+            let rect_area = (max.x - min.x) * (max.y - min.y);
+            if rect_area < 4096.0 || best.is_some_and(|(r, _)| (r.area() as f32) >= rect_area) {
+                continue;
+            }
+            // Les coins du rectangle, deux triangles qui le pavent.
+            let corner = |q: Pos2| (q.x == min.x || q.x == max.x) && (q.y == min.y || q.y == max.y);
+            let area = (egui_orient2df(&a.pos, &b.pos, &c.pos).abs()
+                + egui_orient2df(&d.pos, &e.pos, &g.pos).abs())
+                / 2.0;
+            if !vs.iter().all(|v| corner(v.pos)) || (area - rect_area).abs() > 0.5 {
+                continue;
+            }
+            // Pixels sûrement couverts, découpe comprise.
+            let r = DamageRect {
+                x0: sat_i32(min.x.floor()) + 1,
+                y0: sat_i32(min.y.floor()) + 1,
+                x1: sat_i32(max.x.ceil()) - 1,
+                y1: sat_i32(max.y.ceil()) - 1,
+            }
+            .intersect(&DamageRect {
+                x0: p.iclip.x0 + 1,
+                y0: p.iclip.y0 + 1,
+                x1: p.iclip.x1 - 1,
+                y1: p.iclip.y1 - 1,
+            });
+            if !r.is_empty() && best.is_none_or(|b| r.area() > b.0.area()) {
+                best = Some((r, j));
+            }
+        }
+    }
+    best
+}
+
+/// Marquage des tuiles en tenant compte de la région qui y écrit en dernier.
+struct OwnedMarker<'a> {
+    tiles: &'a mut [u8],
+    owner: &'a [u8],
+    w: i32,
+    h: i32,
+}
+
+impl OwnedMarker<'_> {
+    fn each(&mut self, r: DamageRect, keep: impl Fn(u8) -> bool) {
+        if r.is_empty() {
+            return;
+        }
+        let tx0 = (r.x0.max(0) / TILE_W).min(self.w);
+        let ty0 = (r.y0.max(0) / TILE_H).min(self.h);
+        let tx1 = ((r.x1.max(0) + TILE_W - 1) / TILE_W).min(self.w);
+        let ty1 = ((r.y1.max(0) + TILE_H - 1) / TILE_H).min(self.h);
+        for ty in ty0..ty1 {
+            for tx in tx0..tx1 {
+                let i = (ty * self.w + tx) as usize;
+                if keep(self.owner[i]) {
+                    self.tiles[i] = 1;
+                }
+            }
+        }
+    }
+
+    /// Pixels dont la région `k` répond : pas ceux qu'une région suivante réécrit.
+    fn mark_for(&mut self, k: usize, r: DamageRect) {
+        self.each(r, |o| (o as usize) <= k + 1);
+    }
+
+    /// Pixels qu'aucune recopie n'écrit entièrement.
+    fn mark_unowned(&mut self, r: DamageRect) {
+        self.each(r, |o| o == 0);
+    }
+}
+
 struct TileMarker<'a> {
     tiles: &'a mut [u8],
     w: i32,
@@ -1095,23 +1590,19 @@ impl TileMarker<'_> {
 }
 
 /// Zone où l'appartenance d'un pixel à l'aplat peut différer entre `p` et `p - t` à cause
-/// de l'arête `a-b`. Une arête verticale ne compte qu'à ses extrémités.
-fn edge_sweep(a: Pos2, b: Pos2, t: i32, mut out: impl FnMut(DamageRect)) {
-    let t = t as f32;
-    if a.x == b.x {
-        for p in [a, b] {
-            out(DamageRect::around(
-                vec2(p.x, p.y.min(p.y + t)),
-                vec2(p.x, p.y.max(p.y + t)),
-            ));
+/// de l'arête `a-b` (balayée par la translation). Une arête parallèle à la translation ne
+/// compte qu'à ses extrémités.
+fn edge_sweep(a: Pos2, b: Pos2, t: [i32; 2], mut out: impl FnMut(DamageRect)) {
+    let t = vec2(t[0] as f32, t[1] as f32);
+    let d = b - a;
+    if d.x * t.y == d.y * t.x {
+        for p in [a.to_vec2(), b.to_vec2()] {
+            out(DamageRect::around(p.min(p + t), p.max(p + t)));
         }
     } else {
-        let min = vec2(a.x.min(b.x), a.y.min(b.y));
-        let max = vec2(a.x.max(b.x), a.y.max(b.y));
-        out(DamageRect::around(
-            vec2(min.x, min.y.min(min.y + t)),
-            vec2(max.x, max.y.max(max.y + t)),
-        ));
+        let min = a.to_vec2().min(b.to_vec2());
+        let max = a.to_vec2().max(b.to_vec2());
+        out(DamageRect::around(min.min(min + t), max.max(max + t)));
     }
 }
 
@@ -1268,6 +1759,26 @@ pub(crate) fn shift_rects(data: &mut [[u8; 4]], width: usize, rects: &[DamageRec
             for y in (r.y0..r.y1).rev() {
                 copy(y);
             }
+        }
+    }
+}
+
+/// Recopie dans `dst` le contenu lu en `dst - t`, sans écraser une ligne avant de l'avoir lue.
+pub(crate) fn move_rect(data: &mut [[u8; 4]], width: usize, dst: DamageRect, t: [i32; 2]) {
+    let w = dst.width() as usize;
+    let (dx, sx) = (dst.x0 as usize, (dst.x0 - t[0]) as usize);
+    let mut copy = |y: i32| {
+        let d = y as usize * width + dx;
+        let s = (y - t[1]) as usize * width + sx;
+        data.copy_within(s..s + w, d);
+    };
+    if t[1] > 0 {
+        for y in (dst.y0..dst.y1).rev() {
+            copy(y);
+        }
+    } else {
+        for y in dst.y0..dst.y1 {
+            copy(y);
         }
     }
 }

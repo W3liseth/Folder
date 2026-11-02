@@ -234,6 +234,13 @@ fn load_with(
             fx.push(Effect::LoadDrives);
             fx.push(Effect::LoadRecent);
         }
+        Location::Settings => {
+            pane.listing = None;
+            pane.incoming = None;
+            pane.selection.clear();
+            pane.status = ListingStatus::Idle;
+            fx.push(Effect::Unwatch { key });
+        }
         Location::Dir(path) => {
             pane.incoming = Some(DirSnapshot::new(path.clone(), generation, sort));
             pane.status = ListingStatus::Loading {
@@ -375,13 +382,50 @@ pub fn add_pane(state: &mut AppState) -> Vec<Effect> {
     if !state.tab().has_room(1) {
         return vec![];
     }
-    let loc = state.pane().location().clone();
+    // Les Paramètres ne s'ouvrent qu'une fois : le nouveau volet part de l'accueil.
+    let loc = match state.pane().location() {
+        Location::Settings => Location::Home,
+        other => other.clone(),
+    };
     let pane = state.new_pane(Location::Home);
     let id = pane.id;
     let tab = state.tab_mut();
     tab.panes.push(pane);
     tab.active = tab.panes.len() - 1;
     load(state, id, loc, false)
+}
+
+/// Ouvre les Paramètres dans un onglet : celui (ou le volet) qui les montre déjà est
+/// activé, sinon un nouvel onglet à la fin. `notes` : sur les notes de version.
+pub fn open_settings(state: &mut AppState, notes: bool) -> Vec<Effect> {
+    state.requests.release_notes |= notes;
+    let shown = state.tabs.iter().enumerate().find_map(|(t, tab)| {
+        tab.panes
+            .iter()
+            .position(|p| matches!(p.location(), Location::Settings))
+            .map(|i| (t, i))
+    });
+    match shown {
+        Some((t, i)) => {
+            state.active_tab = t;
+            state.tabs[t].active = i;
+            after_selection(state)
+        }
+        None => open_tab(state, Location::Settings),
+    }
+}
+
+/// Multiview : échange le volet actif avec son voisin de gauche (ou de droite, `right`) ;
+/// il garde le focus. Sans effet au bord.
+pub fn move_pane(state: &mut AppState, right: bool) -> Vec<Effect> {
+    let tab = state.tab_mut();
+    let i = tab.active.min(tab.panes.len() - 1);
+    let j = if right { i + 1 } else { i.wrapping_sub(1) };
+    if j < tab.panes.len() {
+        tab.panes.swap(i, j);
+        tab.active = j;
+    }
+    vec![]
 }
 
 /// Ferme le volet `index` de l'onglet actif en multiview. Le focus passe au volet voisin

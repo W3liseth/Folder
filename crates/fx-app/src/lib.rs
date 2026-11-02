@@ -25,6 +25,3 @@ pub use msg::Msg;
 pub use scheduler::{Scheduler, Waker};
 pub use state::{AppState, ListingStatus, Pane, PaneId, Tab, Tags};
 pub use update::update;
-
-/// Titre de la fenêtre Paramètres (processus `--settings`), pour la ramener au premier plan.
-pub const SETTINGS_TITLE: &str = "Paramètres de folder";

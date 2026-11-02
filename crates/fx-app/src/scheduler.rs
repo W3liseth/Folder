@@ -633,31 +633,6 @@ impl Scheduler {
                 };
                 out.send(Msg::SubdirsLoaded { generation, result });
             }),
-            Effect::SettingsWindow { notes } => {
-                let owner = self.owner.load(Ordering::Relaxed);
-                self.io(move || {
-                    if fx_win::window::focus_title(crate::SETTINGS_TITLE) {
-                        return;
-                    }
-                    let mut cmd = match std::env::current_exe() {
-                        Ok(exe) => std::process::Command::new(exe),
-                        Err(e) => {
-                            out.send(Msg::Error(format!("Paramètres indisponibles : {e}")));
-                            return;
-                        }
-                    };
-                    cmd.arg("--settings");
-                    if notes {
-                        cmd.arg("--notes");
-                    }
-                    if owner != 0 {
-                        cmd.args(["--owner", &owner.to_string()]);
-                    }
-                    if let Err(e) = cmd.spawn() {
-                        out.send(Msg::Error(format!("Paramètres indisponibles : {e}")));
-                    }
-                });
-            }
             Effect::CheckUpdate { force, delay } => {
                 // Thread temporaire : le processus de vérification peut télécharger
                 // l'installeur (plusieurs secondes), sans occuper le pool I/O.

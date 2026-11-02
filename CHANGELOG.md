@@ -5,6 +5,20 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.13.0 — 2026-11-02
+
+- Les **Paramètres** s'ouvrent dans un onglet au lieu d'une fenêtre à part. Les rouvrir
+  ramène à l'onglet déjà ouvert ; ils sont retrouvés avec la session.
+- Paramètres › Raccourcis : chaque commande a deux emplacements de raccourci et un bouton
+  « Rétablir », grisé tant que la commande garde ses raccourcis par défaut. Un raccourci
+  déjà utilisé passe à la nouvelle commande ; un clic droit efface un emplacement.
+- Nouveau raccourci **« Volet précédent »** (Ctrl+Maj+←), en face de « Volet suivant ».
+- Multiview : deux **flèches** après « Défilement synchronisé » déplacent le volet actif
+  d'une place à gauche ou à droite (Ctrl+Maj+Pg préc. / Pg suiv.), les volets glissant
+  jusqu'à leur nouvelle place. Le glissement est fluide : les volets sont recopiés d'une
+  image à l'autre au lieu d'être redessinés (environ deux fois moins de travail par image
+  en 1440p), avec un départ et une arrivée en douceur.
+
 ## 0.12.0 — 2026-11-01
 
 - Le double volet devient **Multiview** : jusqu'à six volets dans un même onglet, côte à

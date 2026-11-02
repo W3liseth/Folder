@@ -29,6 +29,9 @@ pub struct CommandContext {
     pub closed_tabs: usize,
     /// L'onglet affiche plusieurs volets (multiview).
     pub multi_pane: bool,
+    /// Multiview : le volet actif a un voisin à gauche, à droite (réorganisation).
+    pub pane_movable_left: bool,
+    pub pane_movable_right: bool,
     /// L'onglet peut recevoir un volet de plus ([`MAX_PANES`]).
     pub can_add_pane: bool,
     /// Sélection d'un seul fichier (pas dossier).
@@ -116,6 +119,9 @@ commands! {
     NewWindow => Tabs, "Nouvelle fenêtre", "\u{E737}", ["Ctrl+N"];
     AddPane => Tabs, "Multiview : ajouter un volet", "\u{E89F}", ["Ctrl+Shift+S"];
     FocusOtherPane => Tabs, "Volet suivant", "\u{E8AB}", ["Ctrl+Shift+Right"];
+    FocusPreviousPane => Tabs, "Volet précédent", "\u{E8AB}", ["Ctrl+Shift+Left"];
+    MovePaneLeft => Tabs, "Déplacer le volet à gauche", "\u{E72B}", ["Ctrl+Shift+PageUp"];
+    MovePaneRight => Tabs, "Déplacer le volet à droite", "\u{E72A}", ["Ctrl+Shift+PageDown"];
     ClosePane => Tabs, "Fermer le volet actif", "\u{E711}", [];
     SeparatePanes => Tabs, "Séparer les volets en onglets", "\u{E8A7}", [];
     ToggleSyncScroll => Tabs, "Défilement synchronisé", "\u{E71B}", ["Ctrl+Shift+D"];
@@ -231,7 +237,11 @@ impl CommandId {
             CloseTab => c.tabs > 1,
             NextTab | PreviousTab => c.tabs > 1,
             ReopenClosedTab => c.closed_tabs > 0,
-            FocusOtherPane | ClosePane | SeparatePanes | ToggleSyncScroll => c.multi_pane,
+            FocusOtherPane | FocusPreviousPane | ClosePane | SeparatePanes | ToggleSyncScroll => {
+                c.multi_pane
+            }
+            MovePaneLeft => c.pane_movable_left,
+            MovePaneRight => c.pane_movable_right,
             AddPane => c.can_add_pane,
             Undo => c.can_undo,
             Redo => c.can_redo,

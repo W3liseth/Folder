@@ -239,7 +239,7 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 /// `src` posée sur `dst` (couleurs prémultipliées, mélange « over » du moteur de rendu).
-fn over(src: Color32, dst: Color32) -> Color32 {
+pub(crate) fn over(src: Color32, dst: Color32) -> Color32 {
     let k = 255 - u16::from(src.a());
     let c = |s: u8, d: u8| (u16::from(s) + (u16::from(d) * k + 127) / 255).min(255) as u8;
     Color32::from_rgba_premultiplied(

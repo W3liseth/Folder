@@ -1,19 +1,11 @@
-//! Messages entre processus folder : de la fenêtre Paramètres (`folder.exe --settings`) vers
-//! la fenêtre principale, qui reste la seule à écrire les réglages et la base des
-//! étiquettes ; et d'une fenêtre principale à une autre (onglet glissé de l'une à l'autre).
+//! Messages entre processus folder : d'une fenêtre principale à une autre (onglet glissé de
+//! l'une à l'autre), et d'un `folder.exe --open-folder` éphémère vers la dernière fenêtre.
 //! Format texte simple : une lettre de type puis la charge utile.
 
 use std::path::PathBuf;
 
-use crate::{Settings, Tag, TagId};
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Remote {
-    /// Nouveaux réglages complets.
-    Settings(Box<Settings>),
-    /// Étiquette créée (`id` 0) ou modifiée.
-    SaveTag(Tag),
-    DeleteTag(TagId),
     /// Onglet d'une autre fenêtre survolant la barre d'onglets : pointeur en `at` (pixels
     /// écran), saisi en `grab` (points, depuis son coin haut gauche), emplacement `path`
     /// (cf. `Location::window_arg`). La barre le montre sous le pointeur, comme un des siens.
@@ -33,9 +25,6 @@ pub enum Remote {
         back: Vec<PathBuf>,
         forward: Vec<PathBuf>,
     },
-    /// Installer la mise à jour téléchargée : la fenêtre principale lance l'installeur et se
-    /// ferme en enregistrant sa session.
-    InstallUpdate,
     /// Dossier ouvert par une autre application, folder étant le gestionnaire de fichiers
     /// par défaut (`folder.exe --open-folder`) : nouvel onglet, fenêtre ramenée devant.
     OpenFolder(PathBuf),
@@ -44,17 +33,10 @@ pub enum Remote {
 impl Remote {
     pub fn encode(&self) -> Vec<u8> {
         match self {
-            Self::Settings(s) => format!("S{}", toml::to_string(s).unwrap_or_default()),
-            Self::SaveTag(t) => format!(
-                "T{}\t{},{},{}\t{}",
-                t.id, t.color[0], t.color[1], t.color[2], t.name
-            ),
-            Self::DeleteTag(id) => format!("D{id}"),
             Self::TabHover { at, grab, path } => {
                 format!("H{}\n{}", numbers(at, grab), path.display())
             }
             Self::TabHoverEnd => "E".to_owned(),
-            Self::InstallUpdate => "U".to_owned(),
             Self::OpenFolder(path) => format!("O{}", path.to_string_lossy()),
             // Une ligne par chemin (un chemin Windows ne contient pas de saut de ligne) :
             // positions, emplacement, puis l'historique préfixé par `<` ou `>`.
@@ -84,18 +66,6 @@ impl Remote {
         let text = std::str::from_utf8(bytes).ok()?;
         let (kind, rest) = text.split_at_checked(1)?;
         match kind {
-            "S" => toml::from_str(rest)
-                .ok()
-                .map(|s| Self::Settings(Box::new(s))),
-            "T" => {
-                let mut parts = rest.splitn(3, '\t');
-                let id = parts.next()?.parse().ok()?;
-                let mut rgb = parts.next()?.split(',').map(|c| c.parse::<u8>());
-                let color = [rgb.next()?.ok()?, rgb.next()?.ok()?, rgb.next()?.ok()?];
-                let name = parts.next()?.trim().to_owned();
-                (!name.is_empty()).then_some(Self::SaveTag(Tag { id, name, color }))
-            }
-            "D" => rest.parse().ok().map(Self::DeleteTag),
             "H" => {
                 let (nums, path) = rest.split_once('\n')?;
                 let (at, grab) = parse_numbers(nums)?;
@@ -106,7 +76,6 @@ impl Remote {
                 })
             }
             "E" => rest.is_empty().then_some(Self::TabHoverEnd),
-            "U" => rest.is_empty().then_some(Self::InstallUpdate),
             "O" => (!rest.is_empty() && !rest.contains('\n'))
                 .then(|| Self::OpenFolder(PathBuf::from(rest))),
             "A" => {
@@ -157,27 +126,14 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let s = Settings {
-            show_hidden: true,
-            accent: Some([1, 2, 3]),
-            ..Settings::default()
-        };
         for r in [
             Remote::OpenFolder(PathBuf::from(r"C:\Users\moi\Téléchargements")),
-            Remote::Settings(Box::new(s)),
-            Remote::SaveTag(Tag {
-                id: 0,
-                name: "Travail\tà faire".into(),
-                color: [0, 120, 212],
-            }),
-            Remote::DeleteTag(7),
             Remote::TabHover {
                 at: [-1200, 30],
                 grab: [52, 16],
                 path: r"C:\Users\moi\Documents".into(),
             },
             Remote::TabHoverEnd,
-            Remote::InstallUpdate,
             Remote::TabDrop {
                 at: [640, 22],
                 grab: [10, 3],
@@ -197,7 +153,9 @@ mod tests {
         }
         assert_eq!(Remote::decode(b"Xgarbage"), None);
         assert_eq!(Remote::decode(b""), None);
-        assert_eq!(Remote::decode(b"T1\t300,0,0\tnom"), None);
+        // Anciens messages de la fenêtre Paramètres (processus disparu) : ignorés.
+        assert_eq!(Remote::decode(b"D7"), None);
+        assert_eq!(Remote::decode(b"U"), None);
         assert_eq!(Remote::decode(b"A1,2,3,4\n"), None);
         assert_eq!(Remote::decode(b"A1,2,3,4\nC:\\x\n?y"), None);
         assert_eq!(Remote::decode(b"H1,2\nC:\\x"), None);

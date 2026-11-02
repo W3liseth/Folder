@@ -77,6 +77,11 @@ impl Harness {
         }
     }
 
+    /// Exécute une commande sur l'état (effets ignorés), comme un raccourci clavier.
+    pub fn command(&mut self, c: fx_commands::CommandId) {
+        let _ = fx_app::update(&mut self.state, fx_app::Msg::Command(c));
+    }
+
     pub fn rows(&self) -> usize {
         self.state.pane().listing.as_ref().map_or(0, |l| l.len())
     }

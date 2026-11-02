@@ -17,92 +17,350 @@ pub fn draw_tab(ui: &mut Ui, f: &mut Fx<'_>) {
     let tab = state.tab();
     let full = ui.available_rect_before_wrap();
     let n = tab.panes.len();
-    // Les cartes d'abord, puis les contenus (chacun découpé à sa carte) : l'ordre des
-    // contenus peut alors changer sans rien changer à l'image.
-    for (i, pane) in tab.panes.iter().enumerate() {
-        let rect = pane_rect(full, n, i);
-        let pal = f.pal;
-        // Carte en relief : ombre douce, fond, contour, reflet clair sur l'arête haute et
-        // liseré d'accent (le volet actif en multiview).
-        widgets::glow(
-            ui,
-            rect.translate(vec2(0.0, 2.0)),
-            8.0,
-            egui::Color32::from_black_alpha(if pal.dark { 70 } else { 22 }),
-            14.0,
-        );
-        ui.painter().rect_filled(rect, 8.0, pal.layer);
-        ui.painter().rect_stroke(
-            rect,
-            8.0,
-            egui::Stroke::new(1.0, pal.stroke),
-            egui::StrokeKind::Inside,
-        );
-        let highlight = if pal.dark {
-            egui::Color32::from_white_alpha(18)
+    let (rects, sliding, moved) = slide_rects(ui, f, tab, full);
+    let synced = tab.sync_scroll && n > 1;
+    // Ordre de dessin : en glissement, le volet actif (celui qu'on déplace) passe au-dessus
+    // des autres ; au repos, l'ordre des volets.
+    let active = tab.active.min(n - 1);
+    let order = |i: usize| -> usize {
+        if sliding {
+            (0..n)
+                .filter(|&k| k != active)
+                .chain([active])
+                .nth(i)
+                .unwrap_or(i)
         } else {
-            egui::Color32::from_white_alpha(200)
+            i
+        }
+    };
+    // Volets déplacés depuis l'image précédente, annoncés au rendu CPU dans l'ordre de dessin
+    // (le dernier écrit ses pixels par-dessus les autres) : leurs pixels sont recopiés au lieu
+    // d'être redessinés.
+    let mut regions = [egui_software_backend::MovedRegion::NONE; fx_commands::MAX_PANES];
+    let mut count = 0;
+    for k in 0..n {
+        if let Some(m) = moved[order(k)] {
+            regions[count] = m;
+            count += 1;
+        }
+    }
+    egui_software_backend::set_moved_regions(&regions[..count]);
+    if sliding || !synced {
+        // Chaque volet, carte puis contenu : en glissement, ils se croisent, celui du dessus
+        // doit recouvrir l'autre entièrement.
+        for k in 0..n {
+            let i = order(k);
+            card(ui, f, tab, i, rects[i]);
+            content(ui, f, &tab.panes[i], rects[i], synced);
+        }
+        return;
+    }
+    // Défilement synchronisé : les cartes d'abord, puis les contenus (chacun découpé à sa
+    // carte), le volet qui mène en premier : les autres suivent son écart dans la même image
+    // (sinon ceux dessinés avant lui auraient une image de retard). Ses barres de défilement
+    // s'affichent aussi dans les volets qui suivent.
+    for (i, &rect) in rects.iter().enumerate() {
+        card(ui, f, tab, i, rect);
+    }
+    let lead = sync_leader(ui, tab, full);
+    for i in [lead].into_iter().chain((0..n).filter(|&i| i != lead)) {
+        content(ui, f, &tab.panes[i], rects[i], synced);
+    }
+}
+
+/// Débord de l'ombre d'une carte au-delà de son bord (flou, décalage, lissage).
+const CARD_SPILL: f32 = 12.0;
+
+/// Réorganisation des volets : place courante d'un volet, qui glisse de son ancienne place
+/// vers la nouvelle (180 ms, comme la transition de navigation) quand son rang change dans
+/// l'onglet (même nombre de volets).
+#[derive(Clone, Copy)]
+pub(crate) struct PaneSlide {
+    index: usize,
+    count: usize,
+    /// Place de départ, relative au coin de la zone des volets (fenêtre redimensionnée
+    /// pendant le glissement).
+    from: Rect,
+    start: Option<Instant>,
+    /// Place dessinée : image (`cumulative_frame_nr`), place à l'image précédente et à
+    /// celle-ci (une image peut être construite deux fois, cf. `request_discard`).
+    drawn: Option<(u64, Rect, Rect)>,
+    /// Glissement en cours à l'image précédente, à celle-ci.
+    slid: (bool, bool),
+}
+
+impl PaneSlide {
+    /// Place affichée maintenant, et vrai pendant le glissement.
+    fn shown(&self, full: Rect) -> (Rect, bool) {
+        const DURATION: f32 = 0.18;
+        let target = pane_rect(full, self.count, self.index);
+        let Some(start) = self.start else {
+            return (target, false);
         };
+        let t = start.elapsed().as_secs_f32() / DURATION;
+        if t >= 1.0 {
+            return (target, false);
+        }
+        // Départ et arrivée doux : la vitesse culmine au milieu (1,5 fois la moyenne) au
+        // lieu de partir à trois fois la moyenne.
+        let k = t * t * (3.0 - 2.0 * t);
+        let from = self.from.translate(full.min.to_vec2());
+        // Même taille au départ et à l'arrivée (même rangée) : taille exacte, sans le bruit
+        // d'arrondi de l'interpolation (le contenu doit être identique d'une image à l'autre,
+        // au 1/256 de pixel près, pour être recopié).
+        let size = if (from.size() - target.size()).length() < 0.01 {
+            target.size()
+        } else {
+            from.size() + (target.size() - from.size()) * k
+        };
+        (
+            Rect::from_min_size(from.min.lerp(target.min, k), size),
+            true,
+        )
+    }
+}
+
+/// Places des volets de `tab` à cette image, vrai si l'un d'eux glisse encore, et pour chaque
+/// volet décalé depuis l'image précédente (même taille), sa région déplacée (carte et ombre).
+fn slide_rects(
+    ui: &Ui,
+    f: &mut Fx<'_>,
+    tab: &fx_app::Tab,
+    full: Rect,
+) -> (
+    Vec<Rect>,
+    bool,
+    [Option<egui_software_backend::MovedRegion>; fx_commands::MAX_PANES],
+) {
+    use egui_software_backend::MovedRegion;
+    let n = tab.panes.len();
+    let ppp = ui.ctx().pixels_per_point();
+    let frame = ui.ctx().cumulative_frame_nr();
+    let area = ui.clip_rect();
+    let slides = &mut f.vs.pane_slide;
+    // Seuls les volets de l'onglet affiché comptent (quelques entrées au plus).
+    slides.retain(|id, _| tab.panes.iter().any(|p| p.id == *id));
+    let mut sliding = false;
+    let mut moved = [None; fx_commands::MAX_PANES];
+    let rects = tab
+        .panes
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let at_rest = |i| PaneSlide {
+                index: i,
+                count: n,
+                from: Rect::NOTHING,
+                start: None,
+                drawn: None,
+                slid: (false, false),
+            };
+            let e = slides.entry(p.id).or_insert_with(|| at_rest(i));
+            if e.count != n {
+                // Volet ajouté ou fermé : les autres prennent leur place sans glisser.
+                *e = at_rest(i);
+            } else if e.index != i {
+                let (now, _) = e.shown(full);
+                *e = PaneSlide {
+                    index: i,
+                    count: n,
+                    from: now.translate(-full.min.to_vec2()),
+                    start: Some(Instant::now()),
+                    drawn: e.drawn,
+                    slid: e.slid,
+                };
+            }
+            let (rect, moving) = e.shown(full);
+            if !moving {
+                e.start = None;
+            }
+            // Coin et taille sur la grille des pixels, au repos comme en glissement : d'une
+            // image à l'autre, le volet se décale d'un nombre entier de pixels et tout son
+            // contenu reste identique (au 1/256 de pixel près, ce que compare le rendu
+            // partiel pour recopier au lieu de redessiner), sans texte ni bord rééchantillonné.
+            let snap = |v: f32| (v * ppp).round() / ppp;
+            let rect = Rect::from_min_size(
+                pos2(snap(rect.min.x), snap(rect.min.y)),
+                vec2(snap(rect.width()), snap(rect.height())),
+            );
+            sliding |= moving;
+            let before = match e.drawn {
+                Some((f, before, _)) if f == frame => Some(before),
+                Some((_, _, last)) => Some(last),
+                None => None,
+            };
+            let slid_before = match e.drawn {
+                Some((f, ..)) if f == frame => e.slid.0,
+                _ => e.slid.1,
+            };
+            e.slid = (slid_before, moving);
+            e.drawn = Some((frame, before.unwrap_or(rect), rect));
+            // Aussi sans décalage, au début et à la fin du glissement : l'ordre de dessin des
+            // volets y change, le rendu partiel doit apparier chacun à part.
+            if let Some(before) = before
+                && (before != rect || moving || slid_before)
+                && (before.size() - rect.size()).length() < 0.01
+                && i < moved.len()
+            {
+                moved[i] = Some(MovedRegion {
+                    from: before.expand(CARD_SPILL).intersect(area),
+                    delta: rect.min - before.min,
+                });
+            }
+            rect
+        })
+        .collect();
+    if sliding {
+        ui.ctx().request_repaint();
+    }
+    (rects, sliding, moved)
+}
+
+/// Carte du volet `i` : ombre, fond, contour, liseré d'accent du volet actif en multiview ;
+/// un appui dans un volet inactif lui donne le focus.
+fn card(ui: &mut Ui, f: &mut Fx<'_>, tab: &fx_app::Tab, i: usize, rect: Rect) {
+    let n = tab.panes.len();
+    let pane = &tab.panes[i];
+    let pal = f.pal;
+    // Carte en relief : ombre douce, fond, contour, reflet clair sur l'arête haute et
+    // liseré d'accent (le volet actif en multiview).
+    card_body(ui, rect, &pal);
+    ui.painter().rect_stroke(
+        rect,
+        8.0,
+        egui::Stroke::new(1.0, pal.stroke),
+        egui::StrokeKind::Inside,
+    );
+    let highlight = if pal.dark {
+        egui::Color32::from_white_alpha(18)
+    } else {
+        egui::Color32::from_white_alpha(200)
+    };
+    widgets::neon_line(
+        ui,
+        (rect.left() + 12.0)..=(rect.right() - 12.0),
+        rect.top() + 0.5,
+        1.0,
+        highlight,
+    );
+    // Liseré d'accent : seulement pour distinguer le volet actif en multiview.
+    if n > 1 && i == tab.active {
         widgets::neon_line(
             ui,
-            (rect.left() + 12.0)..=(rect.right() - 12.0),
-            rect.top() + 0.5,
-            1.0,
-            highlight,
+            (rect.left() + rect.width() * 0.2)..=(rect.right() - rect.width() * 0.2),
+            rect.top(),
+            1.5,
+            pal.accent.gamma_multiply(0.75),
         );
-        // Liseré d'accent : seulement pour distinguer le volet actif en multiview.
-        if n > 1 && i == tab.active {
-            widgets::neon_line(
-                ui,
-                (rect.left() + rect.width() * 0.2)..=(rect.right() - rect.width() * 0.2),
-                rect.top(),
-                1.5,
-                pal.accent.gamma_multiply(0.75),
-            );
-        }
-        if n > 1 && i == tab.active {
-            widgets::focus_ring(ui, rect, &pal);
-        }
-        // Un appui n'importe où dans un volet inactif lui donne le focus.
-        if n > 1
-            && i != tab.active
-            && ui.input(|inp| {
-                inp.pointer.primary_pressed()
-                    && inp.pointer.interact_pos().is_some_and(|p| rect.contains(p))
-            })
-        {
-            f.send(Msg::FocusPane(pane.id));
-        }
     }
-    // Défilement synchronisé : le volet qui mène est dessiné en premier, les autres suivent
-    // son écart dans la même image (sinon ceux dessinés avant lui auraient une image de
-    // retard). Ses barres de défilement s'affichent aussi dans les volets qui suivent.
-    let synced = tab.sync_scroll && n > 1;
-    let lead = synced.then(|| sync_leader(ui, tab, full));
-    let order = lead
-        .into_iter()
-        .chain((0..n).filter(move |&i| Some(i) != lead));
-    for i in order {
-        let pane = &tab.panes[i];
-        let rect = pane_rect(full, n, i);
-        // Transition à chaque nouvel emplacement : glissement dans le sens de la navigation
-        // (entrer, suivant : depuis la droite ; précédent, parent : depuis la gauche) et fondu.
-        let (offset, opacity) = transition(ui, f, pane);
-        let mut child = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect.shrink(1.0).translate(offset))
-                .id_salt(("pane", pane.id.0))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        child.set_clip_rect(rect.shrink(1.0));
-        if opacity < 1.0 {
-            child.set_opacity(opacity);
-        }
-        if synced {
-            shared_bars(&mut child, f);
-        }
-        draw_pane(&mut child, f, pane);
+    if n > 1 && i == tab.active {
+        widgets::focus_ring(ui, rect, &pal);
     }
+    // Un appui n'importe où dans un volet inactif lui donne le focus.
+    if n > 1
+        && i != tab.active
+        && ui.input(|inp| {
+            inp.pointer.primary_pressed()
+                && inp.pointer.interact_pos().is_some_and(|p| rect.contains(p))
+        })
+    {
+        f.send(Msg::FocusPane(pane.id));
+    }
+}
+
+/// Ombre et fond d'une carte. Rasterisés tels quels, l'ombre floue et le fond arrondi sont
+/// des éventails de triangles qui couvrent toute la carte, pixel par pixel : c'était l'essentiel
+/// du coût d'une image pendant le glissement des volets (cartes redessinées en entier). Ici,
+/// ils ne sont dessinés que sur le pourtour (bandes découpées), là où l'ombre varie et où
+/// sont les coins ; l'intérieur, où l'ombre est uniforme, est un seul rectangle aligné sur
+/// les pixels (recopie rapide du moteur CPU) de la couleur du fond posé sur l'ombre : même
+/// image, translucide (Acrylic) comprise.
+fn card_body(ui: &Ui, rect: Rect, pal: &crate::theme::Palette) {
+    const RADIUS: f32 = 8.0;
+    const BLUR: f32 = 14.0;
+    const DROP: f32 = 2.0;
+    let shadow_color = egui::Color32::from_black_alpha(if pal.dark { 70 } else { 22 });
+    let shadow = egui::Shadow {
+        offset: [0, 0],
+        blur: BLUR as u8,
+        spread: 0,
+        color: shadow_color,
+    }
+    .as_shape(
+        rect.translate(vec2(0.0, DROP)),
+        egui::CornerRadius::same(RADIUS as u8),
+    );
+    // Intérieur : au-delà du flou (BLUR / 2 depuis le bord de l'ombre, décalée de DROP) et
+    // des coins arrondis, avec un pixel de marge ; bords sur la grille des pixels physiques.
+    let ppp = ui.ctx().pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let m = RADIUS.max(BLUR / 2.0 + DROP) + 1.0;
+    let inner = Rect::from_min_max(
+        pos2(snap(rect.left() + m), snap(rect.top() + m)),
+        pos2(snap(rect.right() - m), snap(rect.bottom() - m)),
+    );
+    let painter = ui.painter();
+    if !inner.is_positive() {
+        painter.add(shadow);
+        painter.rect_filled(rect, RADIUS, pal.layer);
+        return;
+    }
+    // Bandes du pourtour, bornées à un centième de pixel en deçà de l'intérieur : le moteur
+    // arrondit les découpes vers l'extérieur, elles ne doivent pas mordre sur le rectangle.
+    let e = 0.01 / ppp;
+    let outer = rect.expand(BLUR + DROP + 2.0);
+    let bands = [
+        Rect::from_min_max(outer.min, pos2(outer.right(), inner.top() - e)),
+        Rect::from_min_max(pos2(outer.left(), inner.bottom() + e), outer.max),
+        Rect::from_min_max(
+            pos2(outer.left(), inner.top()),
+            pos2(inner.left() - e, inner.bottom()),
+        ),
+        Rect::from_min_max(
+            pos2(inner.right() + e, inner.top()),
+            pos2(outer.right(), inner.bottom()),
+        ),
+    ];
+    for band in bands {
+        let p = painter.with_clip_rect(band.intersect(painter.clip_rect()));
+        p.add(shadow.clone());
+        p.rect_filled(rect, RADIUS, pal.layer);
+    }
+    // Deux triangles sans anti-crénelage (un `rect_filled` en ajouterait sur les bords), dans
+    // leur propre découpe : egui ne les fusionne pas avec le contour arrondi qui suit, dont
+    // les sommets des arcs peuvent s'arrondir autrement d'une position à l'autre (le rendu
+    // partiel ne redessine alors que ce contour, pas toute la carte).
+    let fill = if pal.layer.a() == 255 {
+        pal.layer
+    } else {
+        crate::theme::over(pal.layer, shadow_color)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.add_colored_rect(inner, fill);
+    painter
+        .with_clip_rect(inner.intersect(painter.clip_rect()))
+        .add(egui::Shape::mesh(mesh));
+}
+
+/// Contenu d'un volet dans sa carte `rect`.
+fn content(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane, rect: Rect, synced: bool) {
+    // Transition à chaque nouvel emplacement : glissement dans le sens de la navigation
+    // (entrer, suivant : depuis la droite ; précédent, parent : depuis la gauche) et fondu.
+    let (offset, opacity) = transition(ui, f, pane);
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.shrink(1.0).translate(offset))
+            .id_salt(("pane", pane.id.0))
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.set_clip_rect(rect.shrink(1.0));
+    if opacity < 1.0 {
+        child.set_opacity(opacity);
+    }
+    if synced {
+        shared_bars(&mut child, f);
+    }
+    draw_pane(&mut child, f, pane);
 }
 
 /// Volet qui mène le défilement synchronisé : celui sous le pointeur (molette, barre de
@@ -223,7 +481,7 @@ fn transition(ui: &Ui, f: &mut Fx<'_>, pane: &Pane) -> (egui::Vec2, f32) {
     use fx_app::state::NavKind;
     const DURATION: f32 = 0.18;
     let content = match pane.location() {
-        Location::Home => pane.nav.serial,
+        Location::Home | Location::Settings => pane.nav.serial,
         _ => pane
             .listing
             .as_ref()
@@ -259,6 +517,10 @@ fn transition(ui: &Ui, f: &mut Fx<'_>, pane: &Pane) -> (egui::Vec2, f32) {
 
 fn draw_pane(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     let pal = f.pal;
+    if let Location::Settings = pane.location() {
+        super::settings::page(ui, f, pane.id);
+        return;
+    }
     if let Location::Search { .. } = pane.location() {
         search_header(ui, f, pane);
     }

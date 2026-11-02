@@ -9,6 +9,8 @@ pub const RECYCLE_BIN_ID: &str = "::{645FF040-5081-101B-9F08-00AA002F954E}";
 pub const NETWORK_ID: &str = "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}";
 /// Page d'accueil dans l'historique sauvegardé (pas un chemin réel).
 pub const HOME_ID: &str = "folder:home";
+/// Paramètres dans un onglet (session, historique ; pas un chemin réel).
+pub const SETTINGS_ID: &str = "folder:settings";
 /// Entrées d'historique sauvegardées par sens et par volet.
 const SAVED_DEPTH: usize = 30;
 
@@ -34,6 +36,8 @@ pub enum Location {
         root: PathBuf,
         dir: PathBuf,
     },
+    /// Paramètres de folder.
+    Settings,
 }
 
 impl Location {
@@ -43,7 +47,9 @@ impl Location {
             Self::Dir(p) => Some(p),
             Self::Search { root, .. } => Some(root),
             Self::DiskUsage { dir, .. } => Some(dir),
-            Self::Home | Self::Tag(_) | Self::RecycleBin | Self::Network(_) => None,
+            Self::Home | Self::Tag(_) | Self::RecycleBin | Self::Network(_) | Self::Settings => {
+                None
+            }
         }
     }
 
@@ -53,6 +59,9 @@ impl Location {
         let s = path.to_string_lossy();
         if s == HOME_ID {
             return Self::Home;
+        }
+        if s == SETTINGS_ID {
+            return Self::Settings;
         }
         if s.eq_ignore_ascii_case(RECYCLE_BIN_ID)
             || s.eq_ignore_ascii_case("shell:RecycleBinFolder")
@@ -79,6 +88,7 @@ impl Location {
             Self::RecycleBin => Some(PathBuf::from(RECYCLE_BIN_ID)),
             Self::Network(None) => Some(PathBuf::from(NETWORK_ID)),
             Self::Network(Some(s)) => Some(PathBuf::from(s)),
+            Self::Settings => Some(PathBuf::from(SETTINGS_ID)),
             Self::Home | Self::Search { .. } | Self::Tag(_) | Self::DiskUsage { .. } => None,
         }
     }
@@ -115,6 +125,7 @@ impl Location {
     pub fn title(&self) -> String {
         match self {
             Self::Home => "Accueil".into(),
+            Self::Settings => "Paramètres".into(),
             Self::Dir(p) => p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())

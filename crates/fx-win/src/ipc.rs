@@ -1,6 +1,6 @@
-//! Messages entre fenêtres folder de processus différents (fenêtre Paramètres → fenêtre
-//! principale, onglet glissé d'une fenêtre principale à une autre) par `WM_COPYDATA` : pas
-//! de thread ni de canal nommé à ouvrir, le message arrive dans la boucle de la fenêtre.
+//! Messages entre processus folder (onglet glissé d'une fenêtre à une autre, dossier ouvert
+//! de l'extérieur) par `WM_COPYDATA` : pas de thread ni de canal nommé à ouvrir, le message
+//! arrive dans la boucle de la fenêtre.
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;

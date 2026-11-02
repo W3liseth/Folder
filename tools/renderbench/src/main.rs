@@ -6,6 +6,7 @@
 //! renderbench --tree bench-data/100k --verify [--frames 600]
 //! renderbench --tree bench-data/100k [--verify] --acrylic
 //! renderbench --tree bench-data/100k [--verify] --panes 3
+//! renderbench --tree bench-data/100k [--verify] --panes 3 --move
 //! cargo run --release -p renderbench --features rayon -- --tree bench-data/100k
 //! ```
 //!
@@ -30,6 +31,10 @@
 //!
 //! `--panes N` : multiview de N volets sur le même dossier, en défilement synchronisé (tous
 //! les volets défilent à chaque image : une région recopiée par volet).
+//!
+//! `--move` (avec `--panes N`) : au lieu de défiler, le volet actif change de place
+//! (`MovePaneLeft` / `MovePaneRight`) toutes les 40 images ; seules les images du glissement
+//! (180 ms) sont mesurées.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -96,9 +101,9 @@ fn main() -> Result<()> {
     if std::env::args().any(|a| a == "--disk") {
         return disk::main();
     }
-    let (tree, frames, verify, acrylic, panes) = parse_args()?;
+    let (tree, frames, verify, acrylic, panes, moves) = parse_args()?;
     if verify {
-        return verify_all(&tree, frames, acrylic, panes);
+        return verify_all(&tree, frames, acrylic, panes, moves);
     }
     let rayon = cfg!(feature = "rayon");
     println!(
@@ -119,7 +124,7 @@ fn main() -> Result<()> {
     );
     for res in &RESOLUTIONS {
         for mode in [Mode::Cache, Mode::Full, Mode::Partial] {
-            let r = run(&tree, res, mode, frames, acrylic, panes)?;
+            let r = run(&tree, res, mode, frames, acrylic, panes, moves)?;
             println!(
                 "{:<11} {:>4.1} {:>7} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.2} / {:>5.2} | {:>5.1} Mo",
                 format!("{}x{}", res.w, res.h),
@@ -172,6 +177,7 @@ fn run(
     frames: usize,
     acrylic: bool,
     panes: usize,
+    moves: bool,
 ) -> Result<Report> {
     let before = private_mb();
     let ctx = egui::Context::default();
@@ -183,8 +189,16 @@ fn run(
 
     let (mut e, mut t, mut r, mut tot) = (vec![], vec![], vec![], vec![]);
     let mut peak_mem = before;
-    for i in 0..WARMUP + frames {
-        harness.scroll(STEP_POINTS);
+    let mut slide_end = Instant::now();
+    let mut i = 0;
+    while e.len() < frames {
+        let sliding = Instant::now() < slide_end;
+        if !moves {
+            harness.scroll(STEP_POINTS);
+        } else if i >= WARMUP && i % 40 == 0 {
+            harness.command(move_command(i));
+            slide_end = Instant::now() + Duration::from_millis(180);
+        }
         let raw = raw_input(res, i);
 
         let t0 = Instant::now();
@@ -217,15 +231,16 @@ fn run(
         // Appliqué par le moteur ; egui exige qu'on le vide (assertion en debug).
         out.textures_delta.clear();
 
-        if i >= WARMUP {
+        if i >= WARMUP && (!moves || sliding) {
             e.push(ms(t1 - t0));
             t.push(ms(t2 - t1));
             r.push(ms(t3 - t2));
             tot.push(ms(t3 - t0));
         }
-        if i == WARMUP + frames - 1 {
+        if e.len() == frames {
             peak_mem = private_mb();
         }
+        i += 1;
     }
     Ok(Report {
         egui: p50_p95(&mut e),
@@ -238,7 +253,16 @@ fn run(
 
 /// Rendu partiel comparé image par image à un rendu complet, à plusieurs résolutions et
 /// échelles (dont des échelles fractionnaires).
-fn verify_all(tree: &Path, frames: usize, acrylic: bool, panes: usize) -> Result<()> {
+/// Déplacement du volet actif : deux fois à gauche, puis deux fois à droite, etc.
+fn move_command(i: usize) -> fx_commands::CommandId {
+    if (i / 80).is_multiple_of(2) {
+        fx_commands::CommandId::MovePaneLeft
+    } else {
+        fx_commands::CommandId::MovePaneRight
+    }
+}
+
+fn verify_all(tree: &Path, frames: usize, acrylic: bool, panes: usize, moves: bool) -> Result<()> {
     let extra = Res {
         w: 1600,
         h: 900,
@@ -246,7 +270,7 @@ fn verify_all(tree: &Path, frames: usize, acrylic: bool, panes: usize) -> Result
     };
     let mut ok = true;
     for res in RESOLUTIONS[..3].iter().chain([&extra]) {
-        ok &= verify(tree, res, frames, acrylic, panes)?;
+        ok &= verify(tree, res, frames, acrylic, panes, moves)?;
     }
     if !ok {
         bail!("le rendu partiel diffère du rendu complet");
@@ -268,7 +292,14 @@ const VERIFY_STEPS: [f32; 16] = [
     84.0, 84.0, 30.0, -45.0, 0.0, 3.0, -84.0, 120.0, 1.0, 0.0, 0.0, -2.0, 60.0, 17.5, -30.0, 0.0,
 ];
 
-fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool, panes: usize) -> Result<bool> {
+fn verify(
+    tree: &Path,
+    res: &Res,
+    frames: usize,
+    acrylic: bool,
+    panes: usize,
+    moves: bool,
+) -> Result<bool> {
     let ctx = egui::Context::default();
     let mut harness = fx_ui::offscreen::Harness::new(&ctx, load(tree, panes)?);
     harness.set_acrylic(acrylic);
@@ -285,6 +316,14 @@ fn verify(tree: &Path, res: &Res, frames: usize, acrylic: bool, panes: usize) ->
     for i in 0..frames {
         let step = VERIFY_STEPS[i % VERIFY_STEPS.len()];
         harness.scroll(step);
+        // Glissements des volets réorganisés, en plus du reste (une image toutes les 4 ms :
+        // ~40 images par glissement).
+        if moves && i % 60 == 0 {
+            harness.command(move_command(i));
+        }
+        if moves {
+            std::thread::sleep(Duration::from_millis(4));
+        }
         let mut raw = raw_input(res, i);
         raw.events = input_script(i, size);
         let mut out = ctx.run_ui(raw, |ui| harness.ui_interactive(ui));
@@ -492,12 +531,13 @@ fn private_mb() -> f64 {
     fx_win::process::current_memory().map_or(f64::NAN, |m| m.private_bytes as f64 / 1_048_576.0)
 }
 
-fn parse_args() -> Result<(PathBuf, usize, bool, bool, usize)> {
+fn parse_args() -> Result<(PathBuf, usize, bool, bool, usize, bool)> {
     let mut tree = None;
     let mut frames = 300;
     let mut verify = false;
     let mut acrylic = false;
     let mut panes = 1;
+    let mut moves = false;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -509,6 +549,7 @@ fn parse_args() -> Result<(PathBuf, usize, bool, bool, usize)> {
             "--frames" => frames = it.next().context("--frames attend un nombre")?.parse()?,
             "--verify" => verify = true,
             "--acrylic" => acrylic = true,
+            "--move" => moves = true,
             "--panes" => {
                 panes = it.next().context("--panes attend un nombre")?.parse()?;
                 if !(1..=fx_commands::MAX_PANES).contains(&panes) {
@@ -519,7 +560,17 @@ fn parse_args() -> Result<(PathBuf, usize, bool, bool, usize)> {
         }
     }
     let tree = tree.context("--tree <dossier> est requis")?;
-    Ok((std::path::absolute(tree)?, frames, verify, acrylic, panes))
+    if moves && panes < 2 {
+        bail!("--move demande --panes 2 ou plus");
+    }
+    Ok((
+        std::path::absolute(tree)?,
+        frames,
+        verify,
+        acrylic,
+        panes,
+        moves,
+    ))
 }
 
 #[cfg(test)]
@@ -529,7 +580,7 @@ mod tests {
     /// Le rendu partiel (zones modifiées, défilement par recopie) donne la même image qu'un
     /// rendu complet, à chaque image d'un scénario de défilement, survol, sélection et menu ;
     /// aussi sous la palette Acrylic (couches translucides, zones effacées avant d'être
-    /// redessinées).
+    /// redessinées) et pendant le glissement des volets réorganisés.
     #[test]
     fn partial_render_matches_full_render() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("fx-renderbench-{}", std::process::id()));
@@ -548,11 +599,13 @@ mod tests {
         };
         let mut ok = true;
         for (ppp, frames) in [1.0, 1.25].into_iter().zip(frames) {
-            ok &= verify(&dir, &Res { w, h, ppp }, frames, false, 1)?;
+            ok &= verify(&dir, &Res { w, h, ppp }, frames, false, 1, false)?;
         }
-        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], true, 1)?;
-        // Multiview en défilement synchronisé : une région recopiée par volet.
-        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], false, 3)?;
+        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], true, 1, false)?;
+        // Multiview en défilement synchronisé : une région recopiée par volet ; volets
+        // réorganisés qui glissent et se croisent (régions déplacées annoncées).
+        ok &= verify(&dir, &Res { w, h, ppp: 1.0 }, frames[0], false, 3, false)?;
+        ok &= verify(&dir, &Res { w, h, ppp: 1.25 }, frames[0], false, 3, true)?;
         let _ = std::fs::remove_dir_all(&dir);
         assert!(ok, "le rendu partiel diffère du rendu complet");
         Ok(())

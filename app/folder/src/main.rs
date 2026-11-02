@@ -64,21 +64,6 @@ fn main() -> ExitCode {
     // Fenêtre Propriétés (lancée par la fenêtre principale) : processus à part, le temps de
     // la fenêtre.
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    if raw.first().map(String::as_str) == Some("--settings") {
-        let owner = raw
-            .iter()
-            .position(|a| a == "--owner")
-            .and_then(|i| raw.get(i + 1))
-            .and_then(|v| v.parse().ok());
-        let notes = raw.iter().any(|a| a == "--notes");
-        return match fx_ui::settings_window::run(owner, notes) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("folder : {e}");
-                ExitCode::FAILURE
-            }
-        };
-    }
     if raw.first().map(String::as_str) == Some("--properties") {
         return match fx_ui::props_window::parse_args(&raw[1..]) {
             Ok(args) => match fx_ui::props_window::run(args) {

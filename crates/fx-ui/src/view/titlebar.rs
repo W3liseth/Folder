@@ -509,6 +509,7 @@ pub(crate) fn location_glyph(loc: &Location) -> &'static str {
         Location::RecycleBin => glyph::RECYCLE,
         Location::Network(_) => glyph::NETWORK,
         Location::DiskUsage { .. } => glyph::PIE,
+        Location::Settings => glyph::SETTINGS,
     }
 }
 

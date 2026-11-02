@@ -1,7 +1,6 @@
-//! Page Paramètres (dans sa propre fenêtre, cf. `settings_window`) : général, apparence,
-//! dossiers, étiquettes, raccourcis, mises à jour (et notes de version), à propos. Chaque
-//! modification est envoyée à la fenêtre principale, qui l'applique et l'enregistre
-//! aussitôt.
+//! Page Paramètres, dans un onglet (`Location::Settings`) : général, apparence, dossiers,
+//! étiquettes, raccourcis, mises à jour (et notes de version), à propos. Chaque modification
+//! est appliquée et enregistrée aussitôt (`Msg::UpdateSettings`).
 
 use eframe::egui::{
     self, Align, Align2, Frame, Id, Layout, RichText, ScrollArea, Sense, Ui, pos2, vec2,
@@ -28,19 +27,15 @@ const SECTIONS: [(&str, &str); 7] = [
 /// Section des mises à jour (et des notes de version).
 pub(crate) const UPDATES: usize = 5;
 
-/// Page Paramètres dans la fenêtre courante (fenêtre Paramètres à part entière) :
-/// navigation à gauche, section choisie à droite.
-pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
+/// Page Paramètres dans le volet `pane` (sa carte en fait le fond) : navigation à gauche,
+/// section choisie à droite.
+pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>, pane: fx_app::PaneId) {
     let pal = f.pal;
-    egui::Panel::left("settings-nav")
+    let nav = egui::Panel::left(Id::unique(("settings-nav", pane.0)))
         .exact_size(230.0)
         .resizable(false)
         .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(pal.base)
-                .inner_margin(egui::Margin::symmetric(12, 16)),
-        )
+        .frame(Frame::new().inner_margin(egui::Margin::symmetric(12, 16)))
         .show(ui, |ui| {
             ui.label(RichText::new("Paramètres").font(semibold(22.0)));
             ui.add_space(16.0);
@@ -85,12 +80,14 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
                 }
             }
         });
+    let edge = nav.response.rect;
+    ui.painter().vline(
+        edge.right(),
+        (edge.top() + 16.0)..=(edge.bottom() - 16.0),
+        egui::Stroke::new(1.0, pal.stroke),
+    );
     egui::CentralPanel::default()
-        .frame(
-            Frame::new()
-                .fill(pal.layer)
-                .inner_margin(egui::Margin::symmetric(28, 20)),
-        )
+        .frame(Frame::new().inner_margin(egui::Margin::symmetric(28, 20)))
         .show(ui, |ui| {
             let title = if f.vs.settings_section == UPDATES && f.vs.settings_notes {
                 "Notes de version"
@@ -100,7 +97,7 @@ pub(crate) fn page(ui: &mut Ui, f: &mut Fx<'_>) {
             ui.label(RichText::new(title).font(semibold(26.0)));
             ui.add_space(14.0);
             ScrollArea::vertical()
-                .id_salt("settings-scroll")
+                .id_salt(("settings-scroll", pane.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width().min(760.0));
@@ -511,17 +508,22 @@ fn tags(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     }
 }
 
+/// Raccourcis par commande, en quatre colonnes : commande, raccourci 1, raccourci 2, et
+/// « Rétablir » (grisé tant que la commande garde ses raccourcis par défaut).
 fn shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
+    const SLOT_W: f32 = 168.0;
+    const RESET_W: f32 = 84.0;
+    const GAP: f32 = 8.0;
     system_shortcuts(ui, f, s);
     let pal = f.pal;
-    // Capture de la prochaine combinaison pour la commande en cours d'édition.
-    if let Some(cmd) = f.vs.capture_hotkey {
+    // Capture de la prochaine combinaison pour l'emplacement en cours d'édition.
+    if let Some((cmd, slot)) = f.vs.capture_hotkey {
         let pressed = crate::keys::pressed(ui.ctx());
         if let Some(hk) = pressed
             .into_iter()
             .find(|h| h.key != fx_commands::Key::Escape || h.ctrl || h.alt || h.shift)
         {
-            s.keybindings.insert(cmd, vec![hk]);
+            assign_hotkey(s, cmd, slot, Some(hk));
             f.vs.capture_hotkey = None;
         } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             f.vs.capture_hotkey = None;
@@ -529,59 +531,154 @@ fn shortcuts(ui: &mut Ui, f: &mut Fx<'_>, s: &mut Settings) {
     }
     ui.label(
         RichText::new(
-            "Cliquez sur un raccourci pour le modifier, puis appuyez sur la nouvelle combinaison.",
+            "Cliquez sur un raccourci pour le modifier, puis appuyez sur la nouvelle combinaison \
+             (Échap : annuler, clic droit : effacer).",
         )
         .color(pal.text2),
     );
     ui.add_space(8.0);
+    // Colonne des commandes : la place que laissent les deux raccourcis et « Rétablir ».
+    let name_w = |ui: &Ui| (ui.available_width() - 2.0 * SLOT_W - RESET_W - 3.0 * GAP).max(140.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        let head = |ui: &mut Ui, w: f32, text: &str, centered: bool| {
+            let layout = if centered {
+                Layout::centered_and_justified(egui::Direction::LeftToRight)
+            } else {
+                Layout::left_to_right(Align::Center)
+            };
+            ui.allocate_ui_with_layout(vec2(w, 18.0), layout, |ui| {
+                ui.set_width(w);
+                ui.label(RichText::new(text).font(semibold(12.5)).color(pal.text2));
+            });
+        };
+        let w = name_w(ui);
+        head(ui, w, "Commande", false);
+        head(ui, SLOT_W, "Raccourci 1", true);
+        head(ui, SLOT_W, "Raccourci 2", true);
+    });
     let mut group = None;
     for &id in CommandId::ALL {
         if group != Some(id.group()) {
             group = Some(id.group());
             widgets::section(ui, &pal, group_label(id.group()));
         }
+        let defaults = id.default_hotkeys();
+        let keys = s
+            .keybindings
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| defaults.clone());
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(id.glyph())
-                    .font(icon_font(13.0))
-                    .color(pal.text2),
-            );
-            ui.label(id.label());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let custom = s.keybindings.contains_key(&id);
-                if custom
-                    && ui
-                        .small_button("Rétablir")
-                        .on_hover_text("Raccourci par défaut")
-                        .clicked()
-                {
-                    s.keybindings.remove(&id);
-                }
-                let capturing = f.vs.capture_hotkey == Some(id);
+            ui.spacing_mut().item_spacing.x = GAP;
+            let w = name_w(ui);
+            ui.allocate_ui_with_layout(vec2(w, 26.0), Layout::left_to_right(Align::Center), |ui| {
+                ui.set_width(w);
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(
+                    RichText::new(id.glyph())
+                        .font(icon_font(13.0))
+                        .color(pal.text2),
+                );
+                ui.add(egui::Label::new(id.label()).truncate());
+            });
+            for slot in 0..2 {
+                let capturing = f.vs.capture_hotkey == Some((id, slot));
                 let text = if capturing {
                     "Appuyez sur une touche…".to_owned()
                 } else {
-                    let keys = s
-                        .keybindings
-                        .get(&id)
-                        .cloned()
-                        .unwrap_or_else(|| id.default_hotkeys());
-                    if keys.is_empty() {
-                        "—".to_owned()
-                    } else {
-                        keys.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join("   ")
-                    }
+                    keys.get(slot)
+                        .map_or_else(|| "—".to_owned(), ToString::to_string)
                 };
-                let b = egui::Button::new(RichText::new(text).monospace().size(12.0))
-                    .min_size(vec2(160.0, 26.0));
-                if ui.add(b).clicked() {
-                    f.vs.capture_hotkey = Some(id);
+                let color = if capturing || keys.get(slot).is_some() {
+                    pal.text
+                } else {
+                    pal.text3
+                };
+                let b = egui::Button::new(RichText::new(text).monospace().size(12.0).color(color))
+                    .selected(capturing)
+                    .min_size(vec2(SLOT_W, 26.0));
+                let mut r = ui.add_sized(vec2(SLOT_W, 26.0), b);
+                // Au-delà de deux raccourcis (par défaut), les autres restent actifs.
+                if slot == 1 && keys.len() > 2 {
+                    let all: Vec<String> = keys.iter().map(ToString::to_string).collect();
+                    r = r.on_hover_text(format!("Aussi : {}", all[2..].join(", ")));
                 }
-            });
+                if r.clicked() {
+                    f.vs.capture_hotkey = Some((id, slot));
+                }
+                if r.secondary_clicked() && keys.get(slot).is_some() {
+                    assign_hotkey(s, id, slot, None);
+                    if capturing {
+                        f.vs.capture_hotkey = None;
+                    }
+                }
+            }
+            let custom = keys != defaults;
+            let reset = ui.add_enabled(
+                custom,
+                egui::Button::new("Rétablir").min_size(vec2(RESET_W, 26.0)),
+            );
+            let reset = if defaults.is_empty() {
+                reset.on_hover_text("Par défaut : aucun raccourci")
+            } else {
+                let d: Vec<String> = defaults.iter().map(ToString::to_string).collect();
+                reset.on_hover_text(format!("Par défaut : {}", d.join(", ")))
+            };
+            if reset.clicked() {
+                s.keybindings.remove(&id);
+                if f.vs.capture_hotkey.is_some_and(|(c, _)| c == id) {
+                    f.vs.capture_hotkey = None;
+                }
+            }
         });
+    }
+}
+
+/// Place `hk` à l'emplacement `slot` des raccourcis de `cmd` (`None` : l'efface). Un
+/// raccourci ne sert qu'à une commande : celle qui l'avait le perd. Une commande revenue à
+/// ses raccourcis par défaut n'est plus personnalisée.
+fn assign_hotkey(s: &mut Settings, cmd: CommandId, slot: usize, hk: Option<fx_commands::HotKey>) {
+    let effective = |s: &Settings, c: CommandId| {
+        s.keybindings
+            .get(&c)
+            .cloned()
+            .unwrap_or_else(|| c.default_hotkeys())
+    };
+    let mut keys = effective(s, cmd);
+    match hk {
+        Some(hk) => {
+            if slot < keys.len() {
+                keys[slot] = hk;
+            } else {
+                keys.push(hk);
+            }
+            // Déjà dans l'autre emplacement : une seule fois.
+            let mut seen = false;
+            keys.retain(|k| *k != hk || !std::mem::replace(&mut seen, true));
+            for &other in CommandId::ALL {
+                if other != cmd {
+                    let mut o = effective(s, other);
+                    if o.contains(&hk) {
+                        o.retain(|k| *k != hk);
+                        set_keys(s, other, o);
+                    }
+                }
+            }
+        }
+        None if slot < keys.len() => {
+            keys.remove(slot);
+        }
+        None => return,
+    }
+    set_keys(s, cmd, keys);
+}
+
+fn set_keys(s: &mut Settings, cmd: CommandId, keys: Vec<fx_commands::HotKey>) {
+    if keys == cmd.default_hotkeys() {
+        s.keybindings.remove(&cmd);
+    } else {
+        s.keybindings.insert(cmd, keys);
     }
 }
 

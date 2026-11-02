@@ -121,11 +121,6 @@ pub enum Effect {
         show_hidden: bool,
         cancel: CancelToken,
     },
-    /// Fenêtre Paramètres (processus `--settings`), ou ramenée au premier plan si ouverte ;
-    /// `notes` : ouverte sur les notes de version.
-    SettingsWindow {
-        notes: bool,
-    },
     RunAsAdmin(PathBuf),
     OpenTerminal(PathBuf),
     /// Saisie de la barre d'adresse à résoudre hors du thread UI (cf. `address`) : dossier

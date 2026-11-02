@@ -31,6 +31,19 @@
     Les primitives fixes qui recouvrent la zone (fond de la carte, ombres de bord) sont
     analysées triangle par triangle : intérieur des aplats unis invariant, bords et triangles
     non unis endommagés ;
+  - régions déplacées annoncées par l'application (`set_moved_regions`, `MovedRegion` :
+    volet du multiview qui glisse, décalage entier horizontal ou vertical, nul compris) :
+    leurs primitives sont appariées translatées (découpe translatée avec elles), chacune
+    dans son propre ordre de dessin (celui des volets change au début et à la fin d'un
+    glissement) ; les pixels sont recopiés seulement là où du contenu non fixe se trouvait
+    ou arrive (pas l'intérieur de l'aplat opaque de la région, présent aux deux places),
+    directement ou, si une recopie précédente a réécrit la source (volets qui se croisent),
+    via un tampon gardé le temps du glissement. Un pixel couvert par plusieurs destinations
+    appartient à la dernière annoncée. Sont endommagés : l'ancienne place découverte, les
+    primitives d'une autre région qui recouvrent la destination ou la source (sauf sous un
+    aplat opaque de la région dessiné après elles), les primitives fixes non invariantes par
+    la translation ou dessinées après la région. Une annonce fausse ne coûte que du temps.
+    `DamageReport::moves` en rend compte ; `renderbench --panes 3 --move [--verify]` ;
   - mises à jour de texture : seules les primitives qui échantillonnent la zone réécrite
     (nouveaux glyphes de l'atlas) sont redessinées ;
   - repli sur un rendu complet : premier rendu, tampon neuf (`age() != 1`), taille ou échelle

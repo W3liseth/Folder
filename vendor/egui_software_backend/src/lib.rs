@@ -105,7 +105,26 @@ pub mod stats;
 mod winit;
 
 #[cfg(feature = "std")]
-pub use damage::{DamageRect, DamageReport};
+pub use damage::{DamageRect, DamageReport, MovedRegion};
+
+/// Portage fx : régions déplacées annoncées pour la prochaine image (cf. [`MovedRegion`]).
+#[cfg(feature = "std")]
+static MOVED: std::sync::Mutex<([MovedRegion; damage::MAX_MOVES], usize)> =
+    std::sync::Mutex::new(([MovedRegion::NONE; damage::MAX_MOVES], 0));
+
+/// Portage fx : annonce les régions déplacées en bloc depuis l'image précédente (au plus
+/// `MAX_MOVES`, les suivantes ignorées), lues par le prochain
+/// [`EguiSoftwareRender::render_damaged`]. À appeler à chaque image (liste vide sans
+/// déplacement) ; une annonce fausse ou périmée ne fait que coûter du temps.
+#[cfg(feature = "std")]
+pub fn set_moved_regions(regions: &[MovedRegion]) {
+    let mut m = MOVED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let n = regions.len().min(damage::MAX_MOVES);
+    m.0[..n].copy_from_slice(&regions[..n]);
+    m.1 = n;
+}
 
 #[cfg(feature = "winit")]
 pub use winit::{
@@ -161,6 +180,9 @@ pub struct EguiSoftwareRender {
     /// Portage fx : état du rendu partiel (cf. `damage.rs`).
     #[cfg(feature = "std")]
     incremental: damage::Incremental,
+    /// Portage fx : sources des régions déplacées, lues avant d'écrire (cf. `damage.rs`).
+    #[cfg(feature = "std")]
+    move_scratch: Vec<[u8; 4]>,
     #[cfg(feature = "raster_stats")]
     pub stats: RasterStats,
 }
@@ -186,6 +208,8 @@ impl EguiSoftwareRender {
             simd_impl: Default::default(),
             #[cfg(feature = "std")]
             incremental: Default::default(),
+            #[cfg(feature = "std")]
+            move_scratch: Vec::new(),
             #[cfg(feature = "raster_stats")]
             stats: Default::default(),
         }
@@ -482,7 +506,15 @@ impl EguiSoftwareRender {
                 };
                 (*id, region)
             });
-        let plan = inc.plan(reuse_previous, dirty);
+        let (moved, n_moved) = {
+            let mut m = MOVED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let taken = *m;
+            m.1 = 0;
+            taken
+        };
+        let plan = inc.plan(reuse_previous, dirty, &moved[..n_moved]);
 
         #[cfg(feature = "raster_stats")]
         let start = std::time::Instant::now();
@@ -533,6 +565,48 @@ impl EguiSoftwareRender {
                 // Une plage de rectangles par région qui défile, chacune de son décalage.
                 for &(a, b, t) in &inc.copy_spans {
                     damage::shift_rects(buffer.data, buffer.width, &inc.copy_rects[a..b], t);
+                }
+                // Régions déplacées, dans l'ordre des annonces. Une source déjà réécrite par une
+                // recopie précédente (deux volets qui se croisent) est d'abord mise de côté ;
+                // les autres sont recopiées directement. Tampon gardé le temps du glissement.
+                if inc.move_copies.is_empty() {
+                    if self.move_scratch.capacity() > 0 {
+                        self.move_scratch = Vec::new();
+                    }
+                } else {
+                    let width = buffer.width;
+                    let copies = &inc.move_copies;
+                    let saved = |i: usize| {
+                        let (dst, t) = copies[i];
+                        let src = dst.translate([-t[0], -t[1]]);
+                        copies[..i].iter().any(|(d, _)| d.intersects(&src))
+                    };
+                    self.move_scratch.clear();
+                    for i in 0..copies.len() {
+                        if saved(i) {
+                            let (dst, t) = copies[i];
+                            let n = dst.width() as usize;
+                            for y in dst.y0..dst.y1 {
+                                let s = (y - t[1]) as usize * width + (dst.x0 - t[0]) as usize;
+                                self.move_scratch.extend_from_slice(&buffer.data[s..s + n]);
+                            }
+                        }
+                    }
+                    let mut at = 0;
+                    for i in 0..copies.len() {
+                        let (dst, t) = copies[i];
+                        if saved(i) {
+                            let n = dst.width() as usize;
+                            for y in dst.y0..dst.y1 {
+                                let d = y as usize * width + dst.x0 as usize;
+                                buffer.data[d..d + n]
+                                    .copy_from_slice(&self.move_scratch[at..at + n]);
+                                at += n;
+                            }
+                        } else {
+                            damage::move_rect(buffer.data, width, dst, t);
+                        }
+                    }
                 }
                 for rect in &inc.rects {
                     if clear {

@@ -569,6 +569,43 @@ fn drop_on_recycle_bin_asks_then_deletes() {
 }
 
 #[test]
+fn multiview_previous_pane_and_move_panes() {
+    let mut s = state();
+    open(&mut s, r"C:", &[]);
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    let ids: Vec<PaneId> = s.tab().panes.iter().map(|p| p.id).collect();
+    assert_eq!(s.tab().active, 2);
+    update(&mut s, Msg::Command(CommandId::FocusPreviousPane));
+    assert_eq!(s.tab().active, 1);
+    update(&mut s, Msg::Command(CommandId::FocusPreviousPane));
+    update(&mut s, Msg::Command(CommandId::FocusPreviousPane));
+    assert_eq!(s.tab().active, 2, "du premier au dernier");
+    // Le volet du milieu passe à gauche et garde le focus.
+    update(&mut s, Msg::Command(CommandId::FocusPreviousPane));
+    assert!(CommandId::MovePaneLeft.is_enabled(&s.command_context()));
+    assert!(update(&mut s, Msg::Command(CommandId::MovePaneLeft)).is_empty());
+    let order: Vec<PaneId> = s.tab().panes.iter().map(|p| p.id).collect();
+    assert_eq!(order, vec![ids[1], ids[0], ids[2]]);
+    assert_eq!(s.tab().active, 0);
+    assert_eq!(s.pane().id, ids[1]);
+    assert!(!CommandId::MovePaneLeft.is_enabled(&s.command_context()));
+    update(&mut s, Msg::Command(CommandId::MovePaneLeft));
+    assert_eq!(s.tab().panes[0].id, ids[1], "déjà au bord");
+    update(&mut s, Msg::Command(CommandId::MovePaneRight));
+    update(&mut s, Msg::Command(CommandId::MovePaneRight));
+    let order: Vec<PaneId> = s.tab().panes.iter().map(|p| p.id).collect();
+    assert_eq!(order, vec![ids[0], ids[2], ids[1]]);
+    assert_eq!(s.tab().active, 2);
+    assert!(!CommandId::MovePaneRight.is_enabled(&s.command_context()));
+    // Un seul volet : rien à déplacer.
+    update(&mut s, Msg::Command(CommandId::SeparatePanes));
+    let c = s.command_context();
+    assert!(!CommandId::MovePaneLeft.is_enabled(&c) && !CommandId::MovePaneRight.is_enabled(&c));
+    assert!(!CommandId::FocusPreviousPane.is_enabled(&c));
+}
+
+#[test]
 fn multiview_add_pane_and_open_in_next_pane() {
     let mut s = state();
     open(&mut s, r"C:\a", &[("sub", true)]);
@@ -1672,10 +1709,42 @@ fn enabling_auto_update_checks_and_notes_open_settings() {
         fx.iter()
             .any(|e| matches!(e, Effect::CheckUpdate { force: false, .. }))
     );
-    assert!(matches!(
-        update(&mut s, Msg::Command(CommandId::ReleaseNotes))[..],
-        [Effect::SettingsWindow { notes: true }]
-    ));
+    update(&mut s, Msg::Command(CommandId::ReleaseNotes));
+    assert!(matches!(s.pane().location(), Location::Settings));
+    assert!(s.requests.release_notes);
+}
+
+#[test]
+fn settings_open_in_a_single_tab() {
+    let mut s = state();
+    open(&mut s, r"C:", &[]);
+    let fx = update(&mut s, Msg::Command(CommandId::Settings));
+    assert_eq!(s.tabs.len(), 2);
+    assert_eq!(s.active_tab, 1);
+    assert!(matches!(s.pane().location(), Location::Settings));
+    assert_eq!(s.tab().title(), "Paramètres");
+    assert!(!s.requests.release_notes);
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::Enumerate { .. } | Effect::Watch { .. }))
+    );
+    // Déjà ouverts : l'onglet est réactivé, pas dupliqué.
+    update(&mut s, Msg::Command(CommandId::PreviousTab));
+    assert_eq!(s.active_tab, 0);
+    update(&mut s, Msg::Command(CommandId::Settings));
+    assert_eq!((s.tabs.len(), s.active_tab), (2, 1));
+    // Un volet ajouté à côté part de l'accueil ; la session rouvre les Paramètres.
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    assert!(matches!(s.pane().location(), Location::Home));
+    let session = s.session();
+    assert_eq!(
+        session.tabs[1].left.path.as_deref(),
+        Some(Path::new(crate::history::SETTINGS_ID))
+    );
+    assert_eq!(
+        Location::from_path(PathBuf::from(crate::history::SETTINGS_ID)),
+        Location::Settings
+    );
 }
 
 #[test]

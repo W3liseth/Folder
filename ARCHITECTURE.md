@@ -272,6 +272,16 @@ Le moteur CPU ne rasterise plus toute la fenêtre à chaque image (`render_damag
   sont recopiés là où du contenu mobile se trouvait ou arrive (pas le fond uni entre les
   colonnes) ; seule la bande découverte est rasterisée, plus les bords de ce qui ne défile
   pas (ombres de bord de la zone de défilement, coins arrondis et contour de la carte).
+- **Volets déplacés** (réorganisation du multiview, 2026-11-02) : `fx-ui` annonce chaque
+  volet qui a bougé depuis l'image précédente (`egui_software_backend::set_moved_regions`,
+  carte et ombre, décalage entier) ; le moteur apparie ses primitives translatées et
+  recopie ses pixels au lieu de les rasteriser (seulement là où il y a du contenu : pas
+  l'intérieur uni de la carte), y compris quand deux volets se croisent. Pour que le contenu
+  soit identique au 1/256 de pixel près d'une image à l'autre, les volets ont coin et taille
+  sur la grille des pixels, et le fond de la carte est un rectangle à part (sa découpe propre
+  l'empêche d'être fusionné avec le contour arrondi). `renderbench --tree bench-data/100k
+  --panes 3 --move`, 1440p, rasterisation pendant le glissement : p50 6,3 → ~3 ms, 46 % → 5 %
+  des pixels redessinés.
 - **Repli** : rendu complet au premier affichage, après redimensionnement, restauration,
   changement d'échelle ou de thème, ou si plus de 60 % des tuiles sont touchées.
   `FOLDER_CPU_FULL_REDRAW=1` désactive le rendu partiel (diagnostic, mesures A/B).
@@ -623,8 +633,7 @@ pub trait Action: Send + Sync {
   Files.
   Fond **Acrylic** (Windows 11 22H2+, réglage `acrylic`, actif par défaut ; Paramètres ›
   Apparence › Effet de transparence) : `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`
-  sur la fenêtre principale et la fenêtre Paramètres (barre de titre native comprise, même
-  fondu : `view::apply_backdrop`), créées transparentes (winit : `DwmEnableBlurBehindWindow`, région
+  sur la fenêtre principale (fondu : `view::apply_backdrop`), créée transparente (winit : `DwmEnableBlurBehindWindow`, région
   vide), DWM composant alors son canal alpha prémultiplié. Marge de verre de 1 px seulement :
   étendue à toute la fenêtre, DWM y dessinerait ses propres boutons de légende. La palette
   (`Palette::with_acrylic`) pose une teinte légère sur `base` et `side` (barre de titre,
@@ -738,8 +747,7 @@ Seule requête réseau que folder fait sans qu'on ouvre un emplacement réseau ;
   avant, folder répond à raison que la version installée est la dernière publiée.
 - **Rien d'autre n'est envoyé** : deux GET anonymes, agent `folder/<version>`.
 - **Installation, seulement à la demande** : bouton « Mettre à jour » de la barre de titre
-  (`Msg::InstallUpdate`), commande « Installer la mise à jour », ou Paramètres (relayé à la
-  fenêtre principale par `Remote::InstallUpdate`). L'installeur Inno Setup est lancé en
+  (`Msg::InstallUpdate`), commande « Installer la mise à jour », ou Paramètres › Mises à jour. L'installeur Inno Setup est lancé en
   silencieux (`/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH=1`), la
   fenêtre se ferme normalement (session enregistrée), le gestionnaire de redémarrage ferme
   les autres fenêtres folder, puis `[Run]` relance folder si `/RELAUNCH=1` (session
@@ -748,7 +756,7 @@ Seule requête réseau que folder fait sans qu'on ouvre un emplacement réseau ;
   à jour ; `cargo run` affiche « Indisponible ».
 - **Notes de version** : `CHANGELOG.md` (racine), embarqué par `include_str!` et affiché
   dans Paramètres › Mises à jour › Notes de version (commande « Notes de version » :
-  `folder.exe --settings --notes`). Format : `## <version> — <date>` puis une liste ; la
+  onglet Paramètres ouvert sur les notes, `UiRequests::release_notes`). Format : `## <version> — <date>` puis une liste ; la
   première section doit être la version de Cargo.toml (test `notes_cover_every_version`).
   Le workflow Installeur en tire la description de la release.
 
@@ -1006,7 +1014,18 @@ télémétrie distante.
   découvertes, donc de volets. Session : `TabSession { left, right, more, sync_scroll }`,
   lisible par les versions à double volet ; raccourcis personnalisés d'une commande
   renommée (`ToggleDualPane` → `AddPane`) conservés, ceux d'une commande disparue
-  ignorés sans perdre le reste des réglages) ; volet d'aperçu
+  ignorés sans perdre le reste des réglages). **Réorganisation** : flèches gauche et droite
+  juste après l'interrupteur (`MovePaneLeft` / `MovePaneRight`, `Ctrl+Maj+Pg préc.` /
+  `Ctrl+Maj+Pg suiv.`) : le volet actif échange sa place avec son voisin et garde le
+  focus ; chaque volet glisse de son ancienne place à la nouvelle en 180 ms, départ et
+  arrivée doux (`pane::PaneSlide`, place de départ relative à la zone des volets ; le volet
+  déplacé passe au-dessus ; pas de glissement quand un volet est ajouté ou fermé) ; les
+  volets glissants sont recopiés par le rendu CPU, pas redessinés (§3.4, « Volets
+  déplacés »). Cartes : ombre et coins arrondis seulement sur le pourtour (bandes
+  découpées), intérieur en un rectangle uni (`pane::card_body`) ; hors défilement
+  synchronisé, chaque volet est dessiné carte puis contenu. « Volet
+  précédent » (`FocusPreviousPane`, `Ctrl+Maj+←`) répond à « Volet suivant » ; volet
+  d'aperçu
   (texte et code colorés, markdown, grande miniature, infos).
 - **Opérations** : `IFileOperation` avec progression (centre d'état : bouton de la barre de
   navigation à côté de Rechercher et de la palette, menu déroulant avec les opérations en
@@ -1216,11 +1235,14 @@ télémétrie distante.
 - **Fenêtre** : créée cachée puis affichée par `SetWindowPlacement` ; winit est ensuite
   informé de l'état réel (`Visible`, `Maximized`), faute de quoi il recachait la fenêtre au
   premier clic sur Réduire ou Restaurer.
-- **Fenêtre Paramètres** : processus `folder.exe --settings` (même raison que Propriétés),
-  qui envoie chaque modification à la fenêtre principale par `WM_COPYDATA`
-  (`fx_win::ipc`, format `fx_store::remote`) : la fenêtre principale reste la seule à écrire
-  les réglages et la base, et applique tout à chaud ; réouverte au premier plan si déjà là,
-  fermée avec la fenêtre principale (un thread attend la fin de son processus).
+- **Paramètres dans un onglet** (`Location::Settings`, `folder:settings` dans la session et
+  l'historique) : la commande réactive l'onglet ou le volet qui les montre déjà, sinon
+  ouvre un onglet à la fin ; un volet ajouté à côté part de l'accueil (une seule page
+  Paramètres à la fois). Modifications appliquées et enregistrées directement par la
+  fenêtre (`Msg::UpdateSettings`). Raccourcis : quatre colonnes (commande, raccourci 1,
+  raccourci 2, « Rétablir » grisé tant que la commande garde ses raccourcis par défaut) ;
+  un raccourci attribué est retiré de la commande qui l'avait ; clic droit : effacer.
+  Remplace la fenêtre à part (processus `--settings`) des versions ≤ 0.12.
 - **Onglets entre fenêtres** (`fx-ui::view::peer`) : chaque fenêtre est un processus et
   celle d'où part le glisser garde la souris (capture). Elle repère l'autre fenêtre sous le
   curseur (plus haute fenêtre visible qui couvre le point dans l'ordre d'`EnumWindows`, la

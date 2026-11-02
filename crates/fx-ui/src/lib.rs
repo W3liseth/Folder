@@ -100,7 +100,6 @@ pub struct Options {
 pub type Error = Box<dyn std::error::Error>;
 
 pub mod props_window;
-pub mod settings_window;
 
 /// `folder.exe --restore-explorer` (désinstallation) : Windows + E et l'ouverture des
 /// dossiers rendus à l'Explorateur, raccourci clavier d'ouverture retiré (cf.
@@ -239,7 +238,7 @@ struct Core {
     bench: Option<bench::Probe>,
     owner_set: bool,
     last_session_save: Instant,
-    /// Messages de la fenêtre Paramètres (`WM_COPYDATA`, reçus sur le thread UI).
+    /// Messages des autres processus folder (`WM_COPYDATA`, reçus sur le thread UI).
     remote: (
         crossbeam_channel::Sender<Vec<u8>>,
         crossbeam_channel::Receiver<Vec<u8>>,
@@ -472,42 +471,26 @@ impl Core {
         }
     }
 
-    /// Message de la fenêtre Paramètres. Les dimensions propres à cette fenêtre (barre
-    /// latérale, colonnes, épingles) ne sont pas modifiables là-bas : on garde les nôtres.
+    /// Message d'un autre processus folder (onglet glissé, dossier ouvert de l'extérieur).
     fn remote_msg(&mut self, bytes: &[u8]) -> Option<Msg> {
         // Onglet glissé depuis une autre fenêtre : traité par la vue (aperçu, insertion).
         let msg = self
             .view
             .receive_peer(fx_store::remote::Remote::decode(bytes)?)?;
         Some(match msg {
-            fx_store::remote::Remote::Settings(mut s) => {
-                let cur = &self.state.settings;
-                s.sidebar_width = cur.sidebar_width;
-                s.preview_width = cur.preview_width;
-                s.col_name = cur.col_name;
-                s.col_modified = cur.col_modified;
-                s.col_type = cur.col_type;
-                s.col_size = cur.col_size;
-                s.pinned.clone_from(&cur.pinned);
-                s.pinned_initialized = cur.pinned_initialized;
-                Msg::UpdateSettings(s)
-            }
-            fx_store::remote::Remote::SaveTag(t) => Msg::SaveTag(t),
-            fx_store::remote::Remote::InstallUpdate => Msg::InstallUpdate,
             fx_store::remote::Remote::OpenFolder(path) => {
                 if let Some(h) = self.view.hwnd() {
                     fx_win::window::bring_to_front(h);
                 }
                 Msg::OpenInNewTab(fx_app::Location::from_path(path))
             }
-            fx_store::remote::Remote::DeleteTag(id) => Msg::DeleteTag(id),
             fx_store::remote::Remote::TabHover { .. }
             | fx_store::remote::Remote::TabHoverEnd
             | fx_store::remote::Remote::TabDrop { .. } => return None,
         })
     }
 
-    /// Écoute la fenêtre Paramètres dès que la fenêtre principale existe.
+    /// Écoute les autres processus folder dès que la fenêtre principale existe.
     fn listen(&mut self, ctx: &egui::Context) {
         if self.listening {
             return;

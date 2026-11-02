@@ -91,7 +91,8 @@ Vue « Analyser l'espace » sur un vrai dossier (coût de rendu, capture PNG fac
 cargo run --release -p renderbench -- --disk C:\Users --snapshot capture.png
 ```
 
-Rendu partiel comparé image par image au rendu complet (défilement, survol, menus) :
+Rendu partiel comparé image par image au rendu complet (défilement, survol, menus ;
+`--panes 3 --move` : volets réorganisés qui glissent, mesurable aussi sans `--verify`) :
 
 ```bash
 cargo run --release -p renderbench -- --tree bench-data/100k --verify
@@ -132,7 +133,7 @@ Les deux moteurs coexistent : **rendu CPU par défaut**, `--renderer glow` en op
 | `fx-store` | réglages TOML, session, SQLite (étiquettes, préférences par dossier) | écritures hors thread UI |
 | `fx-preview` | aperçus texte/code, markdown, infos | chargé seulement si le volet est ouvert |
 | `fx-app` | `AppState`, `Msg`, `update`, `Effect`, scheduler, historique, opérations, mise à jour et notes de version (`upgrade`), branches Git (`git`, programme `git` de l'utilisateur) | `update` pur, < 1 ms |
-| `fx-ui` | rendu egui, thème, caches de textures ; fenêtres Propriétés (`props_window`, processus `--properties`) et Paramètres (`settings_window`, processus `--settings`, modifications envoyées par `WM_COPYDATA`) | lit l'état, émet des `Msg` ; n'appelle `fx-win` que pour les exceptions ci-dessus (la fenêtre Propriétés, mini-application à part, lit ses données sur ses propres threads) |
+| `fx-ui` | rendu egui, thème, caches de textures ; fenêtre Propriétés (`props_window`, processus `--properties`) ; page Paramètres dans un onglet (`view::settings`) | lit l'état, émet des `Msg` ; n'appelle `fx-win` que pour les exceptions ci-dessus (la fenêtre Propriétés, mini-application à part, lit ses données sur ses propres threads) |
 | `app/folder` | binaire, manifeste, ressources | |
 | `vendor/egui_software_backend` | rasteriseur CPU tiers (porté vers egui 0.37) | hors lints du workspace, modifications minimales |
 | `tools/*` | `gen-tree`, `memprobe`, `renderbench` | outils de mesure, jamais livrés |

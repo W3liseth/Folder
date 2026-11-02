@@ -163,6 +163,13 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             tab.active = (tab.active + 1) % tab.panes.len();
             nav::after_selection(state)
         }
+        FocusPreviousPane => {
+            let tab = state.tab_mut();
+            tab.active = (tab.active + tab.panes.len() - 1) % tab.panes.len();
+            nav::after_selection(state)
+        }
+        MovePaneLeft => nav::move_pane(state, false),
+        MovePaneRight => nav::move_pane(state, true),
 
         Open => {
             let pane = state.pane();
@@ -476,8 +483,8 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             edit::update_settings(state, s)
         }
 
-        Settings => vec![Effect::SettingsWindow { notes: false }],
-        ReleaseNotes => vec![Effect::SettingsWindow { notes: true }],
+        Settings => nav::open_settings(state, false),
+        ReleaseNotes => nav::open_settings(state, true),
         CheckForUpdates => super::upgrade::check(state, true),
         InstallUpdate => super::upgrade::install(state),
         ToggleTheme => {

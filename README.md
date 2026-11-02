@@ -143,7 +143,7 @@ L'installeur est écrit dans `target\installer`.
 | `fx-store` | Réglages, session, étiquettes (TOML et SQLite) |
 | `fx-preview` | Aperçus de texte, de code et de Markdown |
 | `fx-app` | État de l'application, messages, effets, ordonnanceur |
-| `fx-ui` | Interface egui, thème, fenêtres Paramètres et Propriétés |
+| `fx-ui` | Interface egui, thème, page Paramètres (onglet), fenêtre Propriétés |
 | `app/folder` | Exécutable, manifeste, icône |
 
 L'interface utilise [egui](https://github.com/emilk/egui) avec un moteur de rendu CPU

@@ -91,6 +91,7 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
                         widgets::vsep(ui, &pal);
                     }
                     sync_scroll_switch(ui, f);
+                    move_pane_buttons(ui, f);
                 }
                 // Corbeille : ses propres boutons remplacent le premier groupe ; pas
                 // d'étiquettes sur des éléments supprimés.
@@ -187,6 +188,27 @@ fn sync_scroll_switch(ui: &mut Ui, f: &mut Fx<'_>) {
     };
     if r.clicked() {
         f.cmd(CommandId::ToggleSyncScroll);
+    }
+}
+
+/// Flèches qui déplacent le volet actif d'un rang à gauche ou à droite (multiview).
+fn move_pane_buttons(ui: &mut Ui, f: &mut Fx<'_>) {
+    let pal = f.pal;
+    for (cmd, g) in [
+        (CommandId::MovePaneLeft, glyph::BACK),
+        (CommandId::MovePaneRight, glyph::FORWARD),
+    ] {
+        let enabled = f.enabled(cmd);
+        let shortcut = f.shortcut(cmd);
+        let tip = if shortcut.is_empty() {
+            cmd.label().to_owned()
+        } else {
+            format!("{} ({shortcut})", cmd.label())
+        };
+        let r = widgets::tool_button(ui, &pal, g, None, "", enabled).on_hover_text(tip);
+        if r.clicked() {
+            f.cmd(cmd);
+        }
     }
 }
 

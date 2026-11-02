@@ -89,7 +89,7 @@ pub struct ViewState {
     /// Couleur d'accentuation de Windows (quand les réglages n'en imposent pas).
     pub(crate) system_accent: Color32,
     /// L'accent de Windows est gris : le bleu de Windows le remplace (cf.
-    /// `theme::system_accent`). Renseigné par la fenêtre Paramètres, qui l'explique.
+    /// `theme::system_accent`) ; la page Paramètres l'explique.
     pub(crate) system_accent_neutral: bool,
     pub(crate) path_edit: Option<String>,
     pub(crate) search: HashMap<PaneId, String>,
@@ -108,7 +108,8 @@ pub struct ViewState {
     pub(crate) settings_notes: bool,
     /// Paramètres › Mises à jour : résultat revérifié à la première ouverture de la page.
     pub(crate) update_refreshed: bool,
-    pub(crate) capture_hotkey: Option<CommandId>,
+    /// Paramètres : capture d'un raccourci (commande, emplacement 0 ou 1).
+    pub(crate) capture_hotkey: Option<(CommandId, usize)>,
     /// Paramètres : capture du raccourci système qui ouvre folder, et refus éventuel.
     pub(crate) capture_open_hotkey: bool,
     pub(crate) open_hotkey_error: Option<String>,
@@ -148,6 +149,8 @@ pub struct ViewState {
     /// Élément `(volet, id)` sélectionné dès l'appui du bouton : son relâchement ne refait
     /// pas le clic (cf. `items::interact`).
     pub(crate) pressed: Option<(PaneId, u32)>,
+    /// Volets réorganisés en multiview : glissement de chacun vers sa nouvelle place.
+    pub(crate) pane_slide: HashMap<PaneId, pane::PaneSlide>,
     /// Transition de contenu par volet : `(contenu affiché, début, nature)`.
     pub(crate) nav_anim: HashMap<PaneId, (u64, Instant, fx_app::state::NavKind)>,
     /// Onglet en cours de glisser (réordonnancement ou détachement).
@@ -184,7 +187,7 @@ impl ViewState {
         Self {
             accent,
             system_accent: accent,
-            system_accent_neutral: false,
+            system_accent_neutral: theme::system_accent_is_neutral(),
             path_edit: None,
             search: HashMap::new(),
             scroll: HashMap::new(),
@@ -223,6 +226,7 @@ impl ViewState {
             dont_ask_delete: false,
             slow_click: None,
             pressed: None,
+            pane_slide: HashMap::new(),
             nav_anim: HashMap::new(),
             tab_drag: None,
             peer: peer::PeerState::default(),
@@ -469,7 +473,7 @@ fn style_window(ctx: &egui::Context, vs: &mut ViewState, dark: bool, want: bool)
     apply_backdrop(ctx, vs, h, dark, want);
 }
 
-/// Fond Acrylic de la fenêtre `h` (fenêtre principale ou Paramètres) et fondu de sa palette
+/// Fond Acrylic de la fenêtre `h` et fondu de sa palette
 /// (`vs.acrylic_t`), cf. [`style_window`] ; à appeler à chaque image, avant de construire la
 /// palette.
 pub(crate) fn apply_backdrop(
@@ -540,6 +544,10 @@ fn requests(ctx: &egui::Context, f: &mut Fx<'_>) {
     if r.refresh_images {
         f.images.refresh();
     }
+    if r.release_notes {
+        f.vs.settings_section = settings::UPDATES;
+        f.vs.settings_notes = true;
+    }
     if r.focus_path {
         f.vs.path_edit = Some(match f.state.pane().location() {
             Location::Dir(p) => p.display().to_string(),
@@ -553,8 +561,13 @@ fn requests(ctx: &egui::Context, f: &mut Fx<'_>) {
 /// Raccourcis clavier et saisie rapide (aller au premier élément commençant par les
 /// lettres tapées, comme l'Explorateur).
 fn keyboard(ctx: &egui::Context, f: &mut Fx<'_>) {
-    if f.vs.capture_hotkey.is_some() {
-        return; // l'éditeur de raccourcis capture la prochaine touche
+    if f.vs.capture_hotkey.is_some() || f.vs.capture_open_hotkey {
+        // Paramètres quittés pendant une capture : le clavier revient aux commandes.
+        if matches!(f.state.pane().location(), Location::Settings) {
+            return; // l'éditeur de raccourcis capture la prochaine touche
+        }
+        f.vs.capture_hotkey = None;
+        f.vs.capture_open_hotkey = false;
     }
     let typing = ctx.egui_wants_keyboard_input();
     let overlays = f.state.dialog.is_some()

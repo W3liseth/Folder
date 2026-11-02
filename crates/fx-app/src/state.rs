@@ -433,6 +433,8 @@ pub struct UiRequests {
     pub close_window: bool,
     /// Actualiser : relire les miniatures et oublier les images en échec.
     pub refresh_images: bool,
+    /// Paramètres : afficher les notes de version (section Mises à jour).
+    pub release_notes: bool,
 }
 
 pub struct AppState {
@@ -645,6 +647,8 @@ impl AppState {
             tabs: self.tabs.len(),
             closed_tabs: self.closed_tabs.len(),
             multi_pane: self.tab().is_multi(),
+            pane_movable_left: self.tab().is_multi() && self.tab().active > 0,
+            pane_movable_right: self.tab().active + 1 < self.tab().panes.len(),
             can_add_pane: self.tab().has_room(1),
             single_file,
             zip_selected: selected
