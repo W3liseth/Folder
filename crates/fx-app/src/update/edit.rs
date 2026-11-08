@@ -312,6 +312,12 @@ pub fn update_settings(state: &mut AppState, new: Settings) -> Vec<Effect> {
     if old.show_preview && !s.show_preview {
         state.preview = None;
     }
+    if old.grid_size != s.grid_size {
+        // Nouvelle taille par défaut : elle remplace le zoom propre à chaque volet.
+        for p in state.tabs.iter_mut().flat_map(|t| &mut t.panes) {
+            p.grid_size = None;
+        }
+    }
     if old.show_hidden != s.show_hidden || old.folders_first != s.folders_first {
         // Recharge tous les dossiers affichés.
         let panes: Vec<_> = state

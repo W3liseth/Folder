@@ -170,15 +170,17 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>) {
         });
 }
 
-/// Interrupteur du défilement synchronisé (onglet en multiview).
+/// Interrupteur de la synchronisation des volets : défilement et taille des icônes (onglet
+/// en multiview).
 fn sync_scroll_switch(ui: &mut Ui, f: &mut Fx<'_>) {
     let pal = f.pal;
     let on = f.state.tab().sync_scroll;
-    let r = widgets::switch_button(ui, &pal, "Défilement synchronisé", on);
+    let label = CommandId::ToggleSyncScroll.label();
+    let r = widgets::switch_button(ui, &pal, label, on);
     let tip = if on {
-        "Les volets défilent ensemble"
+        "Les volets défilent et changent de taille d'icônes ensemble"
     } else {
-        "Faire défiler tous les volets ensemble"
+        "Faire défiler les volets et changer la taille de leurs icônes ensemble"
     };
     let shortcut = f.shortcut(CommandId::ToggleSyncScroll);
     let r = if shortcut.is_empty() {

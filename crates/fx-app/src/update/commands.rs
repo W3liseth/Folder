@@ -520,12 +520,16 @@ const GRID_SIZES: [u16; 6] = [48, 64, 96, 128, 192, 256];
 
 /// Échelle de l'Explorateur (Ctrl + molette, Ctrl + Plus/Moins) : Détails < Liste < icônes
 /// de 48 à 256 points. La vue Colonnes se place au niveau de Détails.
+///
+/// Le zoom est propre au volet actif ; avec la synchronisation du multiview, il s'applique à
+/// tous les volets de l'onglet, qui prennent la taille atteinte par le volet actif.
 fn zoom(state: &mut AppState, bigger: bool) -> Vec<Effect> {
-    let rung = match state.pane().layout {
+    let p = state.pane();
+    let rung = match p.layout {
         Layout::Details | Layout::Columns => 0,
         Layout::List => 1,
         Layout::Grid => {
-            let cur = state.settings.grid_size;
+            let cur = p.grid_size(state.settings.grid_size);
             2 + GRID_SIZES
                 .iter()
                 .position(|&s| s >= cur)
@@ -537,17 +541,39 @@ fn zoom(state: &mut AppState, bigger: bool) -> Vec<Effect> {
     } else {
         rung.saturating_sub(1)
     };
-    match next {
-        _ if next == rung => vec![],
-        0 => update(state, Msg::SetLayout(Layout::Details)),
-        1 => update(state, Msg::SetLayout(Layout::List)),
-        n => {
-            let mut fx = update(state, Msg::SetGridSize(GRID_SIZES[n - 2]));
-            if state.pane().layout != Layout::Grid {
-                fx.extend(update(state, Msg::SetLayout(Layout::Grid)));
-            }
-            fx
+    if next == rung {
+        return vec![];
+    }
+    let layout = match next {
+        0 => Layout::Details,
+        1 => Layout::List,
+        _ => Layout::Grid,
+    };
+    let mut fx = Vec::new();
+    for id in zoom_group(state) {
+        let Some(p) = state.find_pane_mut(id) else {
+            continue;
+        };
+        if next >= 2 {
+            p.grid_size = Some(GRID_SIZES[next - 2]);
         }
+        // La vue Colonnes est au même échelon que Détails : elle reste telle quelle.
+        let same_rung = p.layout == layout || (next == 0 && p.layout == Layout::Columns);
+        if !same_rung {
+            fx.extend(super::set_layout(state, id, layout));
+        }
+    }
+    fx
+}
+
+/// Volets concernés par le zoom : le volet actif, ou tous ceux de l'onglet quand leur
+/// défilement est synchronisé.
+pub(super) fn zoom_group(state: &AppState) -> Vec<crate::state::PaneId> {
+    let tab = state.tab();
+    if tab.sync_scroll && tab.is_multi() {
+        tab.panes.iter().map(|p| p.id).collect()
+    } else {
+        vec![state.pane().id]
     }
 }
 

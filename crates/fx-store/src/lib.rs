@@ -225,6 +225,7 @@ mod tests {
                 left: PaneSession {
                     path: Some(PathBuf::from(r"C:\")),
                     layout: Layout::Grid,
+                    grid_size: Some(192),
                     back: vec![PathBuf::from("folder:home"), PathBuf::from(r"D:\x")],
                     forward: vec![PathBuf::from(r"C:\Windows")],
                 },

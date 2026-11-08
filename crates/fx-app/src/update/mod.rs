@@ -9,12 +9,12 @@ mod results;
 pub(crate) mod upgrade;
 
 use fx_core::{SortDir, SortKey, SortSpec};
-use fx_store::FolderPrefs;
+use fx_store::{FolderPrefs, Layout};
 
 use crate::effect::{Effect, Persist};
 use crate::history::Location;
 use crate::msg::Msg;
-use crate::state::{AppState, ToastKind, sort_key_id};
+use crate::state::{AppState, PaneId, ToastKind, sort_key_id};
 
 pub use edit::drop_copies;
 pub use nav::sort_indicator;
@@ -108,11 +108,8 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
         }
         Msg::Search { pane, query } => nav::search(state, pane, query),
         Msg::SetLayout(layout) => {
-            let p = state.pane_mut();
-            p.layout = layout;
-            p.columns.clear();
-            p.active_column = 0;
-            remember_folder_prefs(state)
+            let id = state.pane().id;
+            set_layout(state, id, layout)
         }
         Msg::SortBy(key) => {
             let cur = state
@@ -129,8 +126,12 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             apply_sort(state, SortSpec { key, dir, ..cur })
         }
         Msg::SetGridSize(size) => {
-            state.settings.grid_size = size.clamp(48, 256);
-            vec![persist_settings(state)]
+            for id in commands::zoom_group(state) {
+                if let Some(p) = state.find_pane_mut(id) {
+                    p.grid_size = Some(clamp_grid_size(size));
+                }
+            }
+            vec![]
         }
 
         Msg::BeginRename => edit::begin_rename(state),
@@ -475,12 +476,31 @@ pub(crate) fn apply_sort(state: &mut AppState, spec: SortSpec) -> Vec<Effect> {
             l.set_sort(spec);
         }
     }
-    remember_folder_prefs(state)
+    let id = state.pane().id;
+    remember_folder_prefs(state, id)
 }
 
-/// Mémorise disposition et tri du dossier courant.
-fn remember_folder_prefs(state: &mut AppState) -> Vec<Effect> {
-    let p = state.pane();
+/// Bornes de la taille des icônes en vue Grille (points).
+pub(crate) fn clamp_grid_size(size: u16) -> u16 {
+    size.clamp(48, 256)
+}
+
+/// Change la disposition du volet `pane` et la mémorise pour son dossier.
+pub(crate) fn set_layout(state: &mut AppState, pane: PaneId, layout: Layout) -> Vec<Effect> {
+    let Some(p) = state.find_pane_mut(pane) else {
+        return vec![];
+    };
+    p.layout = layout;
+    p.columns.clear();
+    p.active_column = 0;
+    remember_folder_prefs(state, pane)
+}
+
+/// Mémorise disposition et tri du dossier affiché par le volet `pane`.
+fn remember_folder_prefs(state: &mut AppState, pane: PaneId) -> Vec<Effect> {
+    let Some(p) = state.find_pane(pane) else {
+        return vec![];
+    };
     let Location::Dir(dir) = p.location() else {
         return vec![];
     };

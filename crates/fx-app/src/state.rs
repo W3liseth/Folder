@@ -65,6 +65,9 @@ pub struct Pane {
     pub id: PaneId,
     pub history: History,
     pub layout: Layout,
+    /// Taille des icônes en vue Grille, propre au volet (Ctrl + molette) ; `None` : celle des
+    /// réglages.
+    pub grid_size: Option<u16>,
     /// Contenu affiché.
     pub listing: Option<DirSnapshot>,
     /// Contenu en cours de chargement, échangé avec `listing` dès son premier lot : l'ancien
@@ -102,6 +105,7 @@ impl Pane {
             id,
             history: History::new(location),
             layout,
+            grid_size: None,
             listing: None,
             incoming: None,
             status: ListingStatus::Idle,
@@ -123,6 +127,11 @@ impl Pane {
 
     pub fn location(&self) -> &Location {
         self.history.current()
+    }
+
+    /// Taille des icônes en vue Grille : celle du volet, sinon `default` (réglages).
+    pub fn grid_size(&self, default: u16) -> u16 {
+        self.grid_size.unwrap_or(default)
     }
 
     pub fn is_loading(&self) -> bool {
@@ -686,6 +695,7 @@ impl AppState {
             fx_store::PaneSession {
                 path: p.location().session_path(),
                 layout: p.layout,
+                grid_size: p.grid_size,
                 back,
                 forward,
             }

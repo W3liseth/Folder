@@ -1420,15 +1420,73 @@ fn zoom_follows_explorer_ladder() {
     update(&mut s, Msg::Command(CommandId::ZoomIn));
     assert_eq!(s.pane().layout, Layout::List);
     update(&mut s, Msg::Command(CommandId::ZoomIn));
-    assert_eq!((s.pane().layout, s.settings.grid_size), (Layout::Grid, 48));
+    assert_eq!(
+        (s.pane().layout, s.pane().grid_size),
+        (Layout::Grid, Some(48))
+    );
     for _ in 0..10 {
         update(&mut s, Msg::Command(CommandId::ZoomIn));
     }
-    assert_eq!(s.settings.grid_size, 256);
+    assert_eq!(s.pane().grid_size, Some(256));
     for _ in 0..6 {
         update(&mut s, Msg::Command(CommandId::ZoomOut));
     }
     assert_eq!(s.pane().layout, Layout::List);
+}
+
+#[test]
+fn zoom_is_per_pane_unless_synced() {
+    let (mut s, left, right) = dual_tab();
+    let default = s.settings.grid_size;
+    let size = |s: &AppState, id| {
+        let p = s.find_pane(id).expect("volet");
+        (p.layout, p.grid_size(default))
+    };
+    for id in [left, right] {
+        update(&mut s, Msg::FocusPane(id));
+        update(&mut s, Msg::SetLayout(Layout::Grid));
+    }
+    update(&mut s, Msg::FocusPane(left));
+    update(&mut s, Msg::Command(CommandId::ZoomIn));
+    let bigger = size(&s, left).1;
+    assert!(bigger > default);
+    assert_eq!(
+        size(&s, right),
+        (Layout::Grid, default),
+        "l'autre volet ne bouge pas"
+    );
+    assert_eq!(s.settings.grid_size, default, "réglage par défaut inchangé");
+
+    // Synchronisés : le volet actif mène, les autres prennent sa taille.
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
+    update(&mut s, Msg::Command(CommandId::ZoomIn));
+    let both = size(&s, left);
+    assert!(both.1 > bigger);
+    assert_eq!(size(&s, right), both);
+    update(&mut s, Msg::FocusPane(right));
+    for _ in 0..8 {
+        update(&mut s, Msg::Command(CommandId::ZoomOut));
+    }
+    assert_eq!(size(&s, left).0, Layout::Details);
+    assert_eq!(size(&s, right).0, Layout::Details);
+
+    // Gardé dans la session.
+    update(&mut s, Msg::Command(CommandId::ToggleSyncScroll));
+    update(&mut s, Msg::Command(CommandId::ZoomIn));
+    update(&mut s, Msg::Command(CommandId::ZoomIn));
+    let sess = s.session();
+    assert_eq!(
+        sess.tabs[0].right.as_ref().expect("volet droit").grid_size,
+        Some(48)
+    );
+    assert_eq!(sess.tabs[0].left.layout, Layout::Details);
+
+    // Nouvelle taille par défaut dans les réglages : elle s'applique à tous les volets.
+    let mut new = s.settings.clone();
+    new.grid_size = 200;
+    update(&mut s, Msg::UpdateSettings(Box::new(new)));
+    assert_eq!(s.find_pane(right).expect("volet").grid_size, None);
+    assert_eq!(s.settings.grid_size, 200);
 }
 
 #[test]

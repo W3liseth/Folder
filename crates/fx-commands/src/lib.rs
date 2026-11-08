@@ -124,7 +124,7 @@ commands! {
     MovePaneRight => Tabs, "Déplacer le volet à droite", "\u{E72A}", ["Ctrl+Shift+PageDown"];
     ClosePane => Tabs, "Fermer le volet actif", "\u{E711}", [];
     SeparatePanes => Tabs, "Séparer les volets en onglets", "\u{E8A7}", [];
-    ToggleSyncScroll => Tabs, "Défilement synchronisé", "\u{E71B}", ["Ctrl+Shift+D"];
+    ToggleSyncScroll => Tabs, "Synchronisation", "\u{E71B}", ["Ctrl+Shift+D"];
     // Fichiers
     Open => Files, "Ouvrir", "\u{E8E5}", ["Enter"];
     OpenInNewTab => Files, "Ouvrir dans un nouvel onglet", "\u{E8A7}", ["Ctrl+Enter"];

@@ -73,12 +73,14 @@ fn restore_session(state: &mut AppState, sess: &Session) -> Vec<Effect> {
             .map_or(Location::Home, Location::from_path);
         let mut tab = state.new_tab(loc.clone());
         tab.panes[0].layout = t.left.layout;
+        tab.panes[0].grid_size = t.left.grid_size.map(super::clamp_grid_size);
         tab.panes[0].history = History::restored(loc, &t.left.back, &t.left.forward);
         let others = t.right.iter().chain(&t.more);
         for r in others.take(fx_commands::MAX_PANES - 1) {
             let loc = r.path.clone().map_or(Location::Home, Location::from_path);
             let mut p = state.new_pane(loc.clone());
             p.layout = r.layout;
+            p.grid_size = r.grid_size.map(super::clamp_grid_size);
             p.history = History::restored(loc, &r.back, &r.forward);
             tab.panes.push(p);
         }

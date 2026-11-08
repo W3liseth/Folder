@@ -5,6 +5,14 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.13.1 — 2026-11-08
+
+- Multiview : la **taille des icônes** (Ctrl + molette, Ctrl+Plus / Ctrl+Moins) est propre
+  à chaque volet. Quand la synchronisation est active, elle change dans tous les volets à
+  la fois. Chaque volet la retrouve à la réouverture ; modifier « Taille des grandes
+  icônes » dans les Paramètres l'applique à nouveau à tous.
+- L'interrupteur « Défilement synchronisé » s'appelle désormais **« Synchronisation »**.
+
 ## 0.13.0 — 2026-11-02
 
 - Les **Paramètres** s'ouvrent dans un onglet au lieu d'une fenêtre à part. Les rouvrir

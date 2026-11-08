@@ -7,14 +7,20 @@ use fx_core::EntryFlags;
 use super::{Fx, items, list};
 use crate::theme::{glyph, icon_font};
 
-fn tile(f: &Fx<'_>) -> (f32, f32, f32) {
-    let icon = f32::from(f.state.settings.grid_size);
+/// Largeur, hauteur et taille d'icône des tuiles du volet (chaque volet a son zoom).
+fn tile(f: &Fx<'_>, pane: PaneId) -> (f32, f32, f32) {
+    let default = f.state.settings.grid_size;
+    let size = f
+        .state
+        .find_pane(pane)
+        .map_or(default, |p| p.grid_size(default));
+    let icon = f32::from(size);
     (icon + 36.0, icon + 54.0, icon)
 }
 
 /// Nombre de tuiles par ligne (navigation au clavier).
 pub(crate) fn columns_for(f: &Fx<'_>, pane: PaneId) -> usize {
-    let (tw, _, _) = tile(f);
+    let (tw, _, _) = tile(f, pane);
     let w = f.vs.scroll.get(&pane).map_or(800.0, |s| s.width);
     ((w - 16.0) / tw).floor().max(1.0) as usize
 }
@@ -22,7 +28,7 @@ pub(crate) fn columns_for(f: &Fx<'_>, pane: PaneId) -> usize {
 pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     let Some(listing) = &pane.listing else { return };
     let pal = f.pal;
-    let (tw, th, icon) = tile(f);
+    let (tw, th, icon) = tile(f, pane.id);
     list::select_all_strip(ui, f, pane);
     let n = listing.len();
     let per_row = ((ui.available_width() - 16.0) / tw).floor().max(1.0) as usize;

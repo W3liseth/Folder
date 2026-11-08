@@ -992,14 +992,17 @@ télémétrie distante.
   « tout sélectionner » au-dessus des icônes dans l'en-tête, ou en haut des vues Liste et
   Grille) ;
   recherche par frappe ; Ctrl + molette (et Ctrl + Plus/Moins)
-  pour passer de Détails à Liste puis aux icônes de 48 à 256 points ; **multiview**
+  pour passer de Détails à Liste puis aux icônes de 48 à 256 points, propre à chaque volet
+  (`Pane::grid_size`, `None` : taille des Paramètres, qui la rétablit partout quand elle
+  change ; enregistrée avec la session) ; **multiview**
   (jusqu'à `fx_commands::MAX_PANES` = 6 volets par onglet, côte à côte jusqu'à trois puis
   sur deux rangées ; onglet titré « a | b | c », largeur partagée entre les noms ; le
   bouton « Multiview » ajoute un volet sur le dossier en cours (`AddPane`, `Ctrl+Maj+S`) ou
   y intègre un autre onglet avec tous ses volets, sans rechargement ; en multiview, il
-  ferme n'importe quel volet (`Msg::ClosePane`) ou les sépare en onglets. **Défilement
-  synchronisé** (`ToggleSyncScroll`, `Ctrl+Maj+D`, propre à l'onglet, enregistré avec la
-  session) : interrupteur (`widgets::switch_button`, même dessin que ceux des Paramètres)
+  ferme n'importe quel volet (`Msg::ClosePane`) ou les sépare en onglets.
+  **Synchronisation** (`ToggleSyncScroll`, `Ctrl+Maj+D`, propre à l'onglet, enregistrée avec
+  la session ; le zoom s'applique alors à tous les volets, qui prennent la disposition et la
+  taille d'icônes atteintes par le volet actif, `commands::zoom_group`) : interrupteur (`widgets::switch_button`, même dessin que ceux des Paramètres)
   juste après « Nouveau » dans la barre de commandes, dès que l'onglet a plusieurs volets ;
   un volet qu'on fait défiler (molette, barre, clavier) entraîne les autres du même écart
   en points (Détails, Liste, Grille ; pas Colonnes), chacun borné à sa liste ; état

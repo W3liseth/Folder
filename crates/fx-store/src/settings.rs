@@ -191,6 +191,9 @@ pub struct PaneSession {
     /// `None` : page d'accueil.
     pub path: Option<PathBuf>,
     pub layout: Layout,
+    /// Taille des icônes en vue Grille choisie pour ce volet (`None` : celle des réglages).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_size: Option<u16>,
     /// Historique Précédent (du plus ancien au plus récent) et Suivant (du plus lointain au
     /// plus proche), dans le format de `path` ; l'accueil y a son propre identifiant.
     pub back: Vec<PathBuf>,
