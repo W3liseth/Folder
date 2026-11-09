@@ -5,6 +5,18 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.14.0 — 2026-11-09
+
+- Nouvel onglet **Historique** (Ctrl+Maj+H) : les dossiers récemment ouverts, regroupés
+  par jour, du plus récent au plus ancien, avec une recherche. Un clic ouvre le dossier,
+  un clic du milieu l'ouvre dans un nouvel onglet. Une ou plusieurs entrées se retirent
+  avec la croix au survol, les cases à cocher (Ctrl / Maj + clic), la touche Suppr ou le
+  clic droit ; « Effacer l'historique » vide tout. L'historique garde les 500 derniers
+  dossiers et est partagé entre les fenêtres.
+- Une **flèche** à droite du « + » de la barre d'onglets ouvre l'Historique et la liste des
+  **onglets récemment fermés** : n'importe lequel peut être rouvert, pas seulement le
+  dernier.
+
 ## 0.13.1 — 2026-11-08
 
 - Multiview : la **taille des icônes** (Ctrl + molette, Ctrl+Plus / Ctrl+Moins) est propre
