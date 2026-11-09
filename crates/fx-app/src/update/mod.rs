@@ -42,6 +42,12 @@ pub fn update(state: &mut AppState, msg: Msg) -> Vec<Effect> {
             nav::after_selection(state)
         }
         Msg::CloseTab(i) => nav::close_tab(state, i),
+        Msg::ReopenClosedTab(i) => nav::reopen_closed_tab(state, i),
+        Msg::ForgetVisits(paths) => nav::forget_visits(state, &paths),
+        Msg::VisitsLoaded(visits) => {
+            state.visits.replace(visits);
+            vec![]
+        }
         Msg::DetachTab { index, rect } => nav::detach_tab(state, index, rect),
         Msg::RemoveTab(i) => nav::remove_moved_tab(state, i),
         Msg::AdoptTab {

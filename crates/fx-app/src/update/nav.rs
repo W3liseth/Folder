@@ -168,6 +168,12 @@ fn load_with(
     }
     // Précédent/Suivant : l'historique a déjà changé d'emplacement (`moved`).
     let changed_dir = moved.is_some() || pane.location() != &loc;
+    // Historique de navigation : chaque arrivée dans un dossier (pas une actualisation, ni
+    // un onglet restauré, déjà sur son dossier).
+    let visited = match &loc {
+        Location::Dir(p) if changed_dir => Some(p.clone()),
+        _ => None,
+    };
     if push_history {
         pane.history.visit(loc.clone());
     } else {
@@ -236,12 +242,16 @@ fn load_with(
             fx.push(Effect::LoadDrives);
             fx.push(Effect::LoadRecent);
         }
-        Location::Settings => {
+        Location::Settings | Location::History => {
             pane.listing = None;
             pane.incoming = None;
             pane.selection.clear();
             pane.status = ListingStatus::Idle;
             fx.push(Effect::Unwatch { key });
+            if matches!(loc, Location::History) {
+                // Les autres fenêtres écrivent aussi dans l'historique.
+                fx.push(Effect::Persist(Persist::LoadVisits));
+            }
         }
         Location::Dir(path) => {
             pane.incoming = Some(DirSnapshot::new(path.clone(), generation, sort));
@@ -334,7 +344,58 @@ fn load_with(
             });
         }
     }
+    if let Some(path) = visited {
+        let at = fx_win::time::now_filetime();
+        state.visits.visit(&path, at);
+        fx.push(Effect::Persist(Persist::Visit(fx_store::Visit {
+            path,
+            at,
+        })));
+    }
     fx
+}
+
+/// Ouvre l'historique de navigation dans un onglet : celui (ou le volet) qui le montre déjà
+/// est activé et relu, sinon un nouvel onglet à la fin.
+pub fn open_history(state: &mut AppState) -> Vec<Effect> {
+    let shown = state.tabs.iter().enumerate().find_map(|(t, tab)| {
+        tab.panes
+            .iter()
+            .position(|p| matches!(p.location(), Location::History))
+            .map(|i| (t, i))
+    });
+    match shown {
+        Some((t, i)) => {
+            state.active_tab = t;
+            state.tabs[t].active = i;
+            let mut fx = after_selection(state);
+            fx.push(Effect::Persist(Persist::LoadVisits));
+            fx
+        }
+        None => open_tab(state, Location::History),
+    }
+}
+
+/// Rouvre l'onglet fermé `i` (0 = le plus ancien).
+pub fn reopen_closed_tab(state: &mut AppState, i: usize) -> Vec<Effect> {
+    if i >= state.closed_tabs.len() {
+        return vec![];
+    }
+    let loc = state.closed_tabs.remove(i);
+    match loc {
+        Location::Settings => open_settings(state, false),
+        loc => open_tab(state, loc),
+    }
+}
+
+/// Retire des dossiers de l'historique de navigation.
+pub fn forget_visits(state: &mut AppState, paths: &[PathBuf]) -> Vec<Effect> {
+    let removed = state.visits.remove(paths);
+    if removed.is_empty() {
+        vec![]
+    } else {
+        vec![Effect::Persist(Persist::ForgetVisits(removed))]
+    }
 }
 
 pub fn open_tab(state: &mut AppState, loc: Location) -> Vec<Effect> {
@@ -355,7 +416,12 @@ pub fn close_tab(state: &mut AppState, i: usize) -> Vec<Effect> {
         return load(state, id, Location::Home, true);
     }
     let (tab, fx) = remove_tab(state, i);
-    state.closed_tabs.push(tab.active_pane().location().clone());
+    let loc = tab.active_pane().location();
+    // L'historique a sa propre entrée dans le menu des onglets : pas de doublon.
+    if *loc == Location::History {
+        return fx;
+    }
+    state.closed_tabs.push(loc.clone());
     if state.closed_tabs.len() > MAX_CLOSED_TABS {
         state.closed_tabs.remove(0);
     }
@@ -384,9 +450,9 @@ pub fn add_pane(state: &mut AppState) -> Vec<Effect> {
     if !state.tab().has_room(1) {
         return vec![];
     }
-    // Les Paramètres ne s'ouvrent qu'une fois : le nouveau volet part de l'accueil.
+    // Paramètres et historique ne s'ouvrent qu'une fois : le nouveau volet part de l'accueil.
     let loc = match state.pane().location() {
-        Location::Settings => Location::Home,
+        Location::Settings | Location::History => Location::Home,
         other => other.clone(),
     };
     let pane = state.new_pane(Location::Home);

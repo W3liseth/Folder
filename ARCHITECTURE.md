@@ -675,6 +675,7 @@ pub trait Action: Send + Sync {
 | Préférences par dossier (vue, tri, colonnes) | SQLite `folder.db`, table `layout_prefs(path_hash, …)` | `%LOCALAPPDATA%\folder\` |
 | Étiquettes | SQLite `folder.db`, tables `tags`, `tagged(file_id, volume_serial, path, tag_id)` | idem |
 | Historique du centre d'état (100 dernières opérations terminées : titre, issue, heure, durée) | SQLite `folder.db`, table `op_history`, écrite à chaque fin d'opération ; partagée par toutes les fenêtres, relue au lancement et à l'ouverture du centre | idem |
+| Historique de navigation (500 derniers dossiers, un par dossier, date de la dernière visite) | SQLite `folder.db`, table `visits(path COLLATE NOCASE, at)`, écrite à chaque arrivée dans un dossier ; partagée par toutes les fenêtres, relue à l'ouverture de l'onglet Historique | idem |
 
 Clé d'étiquette : `(numéro de série du volume, FileId NTFS)` + chemin de secours, pour
 survivre aux renommages/déplacements sur le même volume (Files stocke `FileFRN`, observé).
@@ -1246,6 +1247,17 @@ télémétrie distante.
   raccourci 2, « Rétablir » grisé tant que la commande garde ses raccourcis par défaut) ;
   un raccourci attribué est retiré de la commande qui l'avait ; clic droit : effacer.
   Remplace la fenêtre à part (processus `--settings`) des versions ≤ 0.12.
+- **Historique de navigation** (`Location::History`, `folder:history`) : même règle
+  d'onglet unique que les Paramètres (commande `History`, Ctrl+Maj+H, et chevron à droite du
+  « + » de la barre d'onglets, qui propose aussi les onglets récemment fermés, chacun
+  rouvrable ; l'onglet Historique fermé n'y figure pas, il a déjà son entrée). Une visite = un volet qui arrive dans un `Location::Dir` (navigation,
+  Précédent/Suivant, nouvel onglet ; pas une actualisation ni un onglet restauré).
+  `AppState::visits` (`fx-app::history::Visits`, vide tant que l'onglet n'a pas été ouvert)
+  est mis à jour sans attendre la base ; seule la lecture répond (`Msg::VisitsLoaded`), et
+  les visites locales plus récentes que la base y restent en tête (écriture sur un autre
+  thread d'I/O passée après la lecture). La vue (`fx-ui::view::history`) ne refait ses
+  lignes (jours, noms, heures) qu'au changement de l'historique, du filtre ou du jour, et
+  ne dessine que les lignes visibles.
 - **Onglets entre fenêtres** (`fx-ui::view::peer`) : chaque fenêtre est un processus et
   celle d'où part le glisser garde la souris (capture). Elle repère l'autre fenêtre sous le
   curseur (plus haute fenêtre visible qui couvre le point dans l'ordre d'`EnumWindows`, la

@@ -109,6 +109,15 @@ pub fn draw(ctx: &egui::Context, f: &mut Fx<'_>) {
                     ),
                 );
                 kv(
+                    "Historique de navigation",
+                    format!(
+                        "{} / {} dossiers ({} Ko)",
+                        f.state.visits.len(),
+                        fx_store::MAX_VISITS,
+                        f.state.visits.heap_bytes() / 1024
+                    ),
+                );
+                kv(
                     "Premier lot",
                     pane.first_batch_after.map_or("—".into(), |t| {
                         format!("{:.1} ms", t.as_secs_f64() * 1000.0)

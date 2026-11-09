@@ -13,6 +13,7 @@ mod diskpicker;
 mod dnd;
 mod gitmenu;
 mod grid;
+mod history;
 mod home;
 mod items;
 mod list;
@@ -103,6 +104,8 @@ pub struct ViewState {
     pub(crate) palette_query: String,
     pub(crate) palette_index: usize,
     pub(crate) search_index: usize,
+    /// Onglet Historique : filtre, sélection, lignes affichées.
+    pub(crate) history: history::HistoryView,
     pub(crate) settings_section: usize,
     /// Paramètres › Mises à jour : notes de version affichées.
     pub(crate) settings_notes: bool,
@@ -198,6 +201,7 @@ impl ViewState {
             palette_query: String::new(),
             palette_index: 0,
             search_index: 0,
+            history: history::HistoryView::default(),
             settings_section: 0,
             settings_notes: false,
             update_refreshed: false,

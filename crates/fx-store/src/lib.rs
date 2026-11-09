@@ -17,7 +17,7 @@ mod settings;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use db::{Db, FolderPrefs, MAX_OP_HISTORY, OpEntry, OpOutcome, Tag, TagId};
+pub use db::{Db, FolderPrefs, MAX_OP_HISTORY, MAX_VISITS, OpEntry, OpOutcome, Tag, TagId, Visit};
 pub use settings::{
     Layout, PaneSession, Session, Settings, SidebarSection, TabSession, ThemeChoice,
     WindowPlacement,

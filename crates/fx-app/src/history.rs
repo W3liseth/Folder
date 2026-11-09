@@ -11,6 +11,8 @@ pub const NETWORK_ID: &str = "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}";
 pub const HOME_ID: &str = "folder:home";
 /// Paramètres dans un onglet (session, historique ; pas un chemin réel).
 pub const SETTINGS_ID: &str = "folder:settings";
+/// Historique de navigation dans un onglet (session, historique ; pas un chemin réel).
+pub const HISTORY_ID: &str = "folder:history";
 /// Entrées d'historique sauvegardées par sens et par volet.
 const SAVED_DEPTH: usize = 30;
 
@@ -38,6 +40,8 @@ pub enum Location {
     },
     /// Paramètres de folder.
     Settings,
+    /// Historique de navigation (dossiers visités, toutes fenêtres confondues).
+    History,
 }
 
 impl Location {
@@ -47,9 +51,12 @@ impl Location {
             Self::Dir(p) => Some(p),
             Self::Search { root, .. } => Some(root),
             Self::DiskUsage { dir, .. } => Some(dir),
-            Self::Home | Self::Tag(_) | Self::RecycleBin | Self::Network(_) | Self::Settings => {
-                None
-            }
+            Self::Home
+            | Self::Tag(_)
+            | Self::RecycleBin
+            | Self::Network(_)
+            | Self::Settings
+            | Self::History => None,
         }
     }
 
@@ -62,6 +69,9 @@ impl Location {
         }
         if s == SETTINGS_ID {
             return Self::Settings;
+        }
+        if s == HISTORY_ID {
+            return Self::History;
         }
         if s.eq_ignore_ascii_case(RECYCLE_BIN_ID)
             || s.eq_ignore_ascii_case("shell:RecycleBinFolder")
@@ -89,6 +99,7 @@ impl Location {
             Self::Network(None) => Some(PathBuf::from(NETWORK_ID)),
             Self::Network(Some(s)) => Some(PathBuf::from(s)),
             Self::Settings => Some(PathBuf::from(SETTINGS_ID)),
+            Self::History => Some(PathBuf::from(HISTORY_ID)),
             Self::Home | Self::Search { .. } | Self::Tag(_) | Self::DiskUsage { .. } => None,
         }
     }
@@ -126,6 +137,7 @@ impl Location {
         match self {
             Self::Home => "Accueil".into(),
             Self::Settings => "Paramètres".into(),
+            Self::History => "Historique".into(),
             Self::Dir(p) => p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -249,6 +261,106 @@ impl History {
     }
 }
 
+/// Historique de navigation : dossiers visités, du plus récent au plus ancien, un seul par
+/// dossier (casse ASCII ignorée, comme `COLLATE NOCASE` dans la base), au plus
+/// [`fx_store::MAX_VISITS`]. Relu de la base à l'ouverture de l'onglet Historique (les autres
+/// fenêtres y écrivent aussi), puis tenu à jour à chaque visite.
+#[derive(Debug, Default)]
+pub struct Visits {
+    entries: Vec<fx_store::Visit>,
+    /// Change à chaque modification : l'UI refait alors sa liste filtrée.
+    revision: u64,
+}
+
+impl Visits {
+    pub fn iter(&self) -> impl Iterator<Item = &fx_store::Visit> {
+        self.entries.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Mémoire occupée (diagnostics F12).
+    pub fn heap_bytes(&self) -> usize {
+        self.entries.capacity() * std::mem::size_of::<fx_store::Visit>()
+            + self
+                .entries
+                .iter()
+                .map(|v| v.path.as_os_str().len())
+                .sum::<usize>()
+    }
+
+    /// Visite de `path` à `at` : le dossier passe en tête.
+    pub(crate) fn visit(&mut self, path: &Path, at: i64) {
+        self.entries.retain(|v| !same_path(&v.path, path));
+        self.entries.insert(
+            0,
+            fx_store::Visit {
+                path: path.to_path_buf(),
+                at,
+            },
+        );
+        self.entries.truncate(fx_store::MAX_VISITS);
+        self.revision += 1;
+    }
+
+    /// Retire ces dossiers ; renvoie ceux qui y étaient.
+    pub(crate) fn remove(&mut self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let mut removed = Vec::new();
+        self.entries.retain(|v| {
+            let hit = paths.iter().any(|p| same_path(&v.path, p));
+            if hit {
+                removed.push(v.path.clone());
+            }
+            !hit
+        });
+        if !removed.is_empty() {
+            self.revision += 1;
+        }
+        removed
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.entries = Vec::new();
+        self.revision += 1;
+    }
+
+    /// Liste relue de la base. Les visites plus récentes que la plus récente de la base
+    /// restent en tête : leur écriture, sur un autre thread d'I/O, a pu passer après la
+    /// lecture.
+    pub(crate) fn replace(&mut self, loaded: Vec<fx_store::Visit>) {
+        let newest = loaded.first().map_or(i64::MIN, |v| v.at);
+        let mut entries: Vec<fx_store::Visit> = self
+            .entries
+            .iter()
+            .filter(|v| v.at > newest)
+            .cloned()
+            .collect();
+        let older: Vec<fx_store::Visit> = loaded
+            .into_iter()
+            .filter(|v| !entries.iter().any(|e| same_path(&e.path, &v.path)))
+            .collect();
+        entries.extend(older);
+        entries.truncate(fx_store::MAX_VISITS);
+        self.entries = entries;
+        self.revision += 1;
+    }
+}
+
+/// Même dossier pour l'historique de navigation (casse ASCII ignorée, comme la base).
+fn same_path(a: &Path, b: &Path) -> bool {
+    a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+}
+
 fn push_bounded(stack: &mut Vec<Location>, l: Location) {
     if stack.len() == MAX_DEPTH {
         stack.remove(0);
@@ -286,6 +398,52 @@ mod tests {
             assert!(!h.visit(d(&i.to_string())));
         }
         assert_eq!(h.back.len(), MAX_DEPTH);
+    }
+
+    #[test]
+    fn visits_move_to_front_and_merge_with_the_db() {
+        let p = PathBuf::from;
+        let at = |v: &Visits| {
+            v.iter()
+                .map(|v| (v.path.display().to_string(), v.at))
+                .collect::<Vec<_>>()
+        };
+        let mut v = Visits::default();
+        v.visit(&p(r"C:\A"), 1);
+        v.visit(&p(r"C:\B"), 2);
+        v.visit(&p(r"c:\a"), 3);
+        assert_eq!(at(&v), [(r"c:\a".into(), 3), (r"C:\B".into(), 2)]);
+        // Base relue sans la visite 3 (écriture pas encore faite) : elle reste en tête.
+        let r = v.revision();
+        v.replace(vec![
+            fx_store::Visit {
+                path: p(r"C:\Z"),
+                at: 2,
+            },
+            fx_store::Visit {
+                path: p(r"C:\A"),
+                at: 1,
+            },
+        ]);
+        assert!(v.revision() > r);
+        assert_eq!(at(&v), [(r"c:\a".into(), 3), (r"C:\Z".into(), 2)]);
+        assert_eq!(
+            v.remove(&[p(r"C:\A"), p(r"C:\nope")]),
+            [p(r"c:\a")],
+            "chemin retiré tel qu'enregistré"
+        );
+        assert_eq!(v.len(), 1);
+        v.clear();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn history_location_round_trips() {
+        assert_eq!(
+            Location::from_path(Location::History.session_path().expect("path")),
+            Location::History
+        );
+        assert_eq!(Location::History.dir(), None);
     }
 
     #[test]

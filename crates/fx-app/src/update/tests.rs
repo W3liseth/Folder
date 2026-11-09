@@ -381,6 +381,131 @@ fn tabs_open_close_and_reopen() {
 }
 
 #[test]
+fn any_closed_tab_can_be_reopened() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    for dir in [r"C:\b", r"C:\c"] {
+        update(&mut s, Msg::OpenInNewTab(Location::Dir(dir.into())));
+    }
+    update(&mut s, Msg::OpenInNewTab(Location::Dir(r"C:\d".into())));
+    update(&mut s, Msg::Command(CommandId::History));
+    // Fermés dans l'ordre : a, b, Historique, d (c reste). L'historique, qui a sa propre
+    // entrée dans le menu, n'est pas retenu.
+    update(&mut s, Msg::CloseTab(0));
+    update(&mut s, Msg::CloseTab(0));
+    update(&mut s, Msg::CloseTab(2));
+    update(&mut s, Msg::CloseTab(1));
+    assert_eq!(s.tabs.len(), 1);
+    assert_eq!(
+        s.closed_tabs,
+        [
+            Location::Dir(r"C:\a".into()),
+            Location::Dir(r"C:\b".into()),
+            Location::Dir(r"C:\d".into()),
+        ]
+    );
+    // Le plus ancien, au milieu du menu : rouvert et retiré de la liste.
+    update(&mut s, Msg::ReopenClosedTab(0));
+    assert_eq!(s.pane().location(), &Location::Dir(r"C:\a".into()));
+    assert_eq!(s.closed_tabs.len(), 2);
+    // Ctrl+Maj+T prend toujours le plus récent.
+    update(&mut s, Msg::Command(CommandId::ReopenClosedTab));
+    assert_eq!(s.pane().location(), &Location::Dir(r"C:\d".into()));
+    update(&mut s, Msg::ReopenClosedTab(0));
+    assert_eq!(s.pane().location(), &Location::Dir(r"C:\b".into()));
+    assert!(s.closed_tabs.is_empty());
+    assert!(update(&mut s, Msg::ReopenClosedTab(0)).is_empty());
+}
+
+#[test]
+fn visited_folders_are_recorded_once_newest_first() {
+    let mut s = state();
+    let visited = |fx: &[Effect]| {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Persist(Persist::Visit(v)) => Some(v.path.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let fx = update(&mut s, Msg::Navigate(Location::Dir(r"C:\a".into())));
+    assert_eq!(visited(&fx), [PathBuf::from(r"C:\a")]);
+    update(&mut s, Msg::Navigate(Location::Dir(r"C:\b".into())));
+    // Actualiser n'est pas une visite ; Précédent en est une.
+    assert!(visited(&update(&mut s, Msg::Command(CommandId::Refresh))).is_empty());
+    let fx = update(&mut s, Msg::Command(CommandId::Back));
+    assert_eq!(visited(&fx), [PathBuf::from(r"C:\a")]);
+    // Accueil, recherche… : pas des dossiers.
+    assert!(visited(&update(&mut s, Msg::Command(CommandId::Home))).is_empty());
+    let order: Vec<_> = s.visits.iter().map(|v| v.path.clone()).collect();
+    assert_eq!(order, [PathBuf::from(r"C:\a"), PathBuf::from(r"C:\b")]);
+    assert!(s.command_context().has_visits);
+
+    // Retrait d'un dossier (casse indifférente), puis de tout.
+    let fx = update(&mut s, Msg::ForgetVisits(vec![PathBuf::from(r"c:\B")]));
+    assert!(matches!(&fx[..],
+        [Effect::Persist(Persist::ForgetVisits(p))] if p == &[PathBuf::from(r"C:\b")]));
+    assert!(update(&mut s, Msg::ForgetVisits(vec![PathBuf::from(r"C:\b")])).is_empty());
+    assert_eq!(s.visits.len(), 1);
+    let fx = update(&mut s, Msg::Command(CommandId::ClearHistory));
+    assert!(matches!(&fx[..], [Effect::Persist(Persist::ClearVisits)]));
+    assert!(s.visits.is_empty());
+    assert!(!s.command_context().has_visits);
+    // Rien à effacer : commande désactivée.
+    assert!(update(&mut s, Msg::Command(CommandId::ClearHistory)).is_empty());
+}
+
+#[test]
+fn history_opens_in_a_single_tab_and_reloads() {
+    let mut s = state();
+    open(&mut s, r"C:\a", &[]);
+    let fx = update(&mut s, Msg::Command(CommandId::History));
+    assert_eq!((s.tabs.len(), s.active_tab), (2, 1));
+    assert_eq!(s.pane().location(), &Location::History);
+    assert_eq!(s.tab().title(), "Historique");
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Persist(Persist::LoadVisits)))
+    );
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::Enumerate { .. } | Effect::Watch { .. }))
+    );
+    // Les autres fenêtres écrivent aussi : relu à chaque retour sur l'onglet.
+    update(&mut s, Msg::Command(CommandId::PreviousTab));
+    let fx = update(&mut s, Msg::Command(CommandId::History));
+    assert_eq!((s.tabs.len(), s.active_tab), (2, 1));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Persist(Persist::LoadVisits)))
+    );
+    update(
+        &mut s,
+        Msg::VisitsLoaded(vec![fx_store::Visit {
+            path: r"D:\autre fenêtre".into(),
+            at: 1,
+        }]),
+    );
+    assert_eq!(
+        s.visits.iter().map(|v| v.path.clone()).collect::<Vec<_>>(),
+        [PathBuf::from(r"C:\a"), PathBuf::from(r"D:\autre fenêtre")],
+        "visite locale plus récente que la base gardée en tête"
+    );
+    // Un dossier ouvert depuis l'historique y revient avec Précédent.
+    let id = pane(&s);
+    update(&mut s, Msg::NavigatePane(id, Location::Dir(r"C:\a".into())));
+    update(&mut s, Msg::Command(CommandId::Back));
+    assert_eq!(s.pane().location(), &Location::History);
+    // Volet ajouté à côté : l'accueil ; la session rouvre l'historique.
+    update(&mut s, Msg::Command(CommandId::AddPane));
+    assert_eq!(s.pane().location(), &Location::Home);
+    assert_eq!(
+        s.session().tabs[1].left.path.as_deref(),
+        Some(Path::new(crate::history::HISTORY_ID))
+    );
+}
+
+#[test]
 fn detached_tab_moves_to_a_new_window() {
     let mut s = state();
     open(&mut s, r"C:\a", &[]);

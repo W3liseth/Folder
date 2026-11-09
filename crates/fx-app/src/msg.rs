@@ -57,6 +57,11 @@ pub enum Msg {
         forward: Vec<PathBuf>,
         index: usize,
     },
+    /// Rouvre l'onglet fermé `i` de `AppState::closed_tabs` (0 = le plus ancien) et le
+    /// retire de la liste.
+    ReopenClosedTab(usize),
+    /// Retire ces dossiers de l'historique de navigation.
+    ForgetVisits(Vec<PathBuf>),
     FocusPane(PaneId),
     /// L'onglet `i` quitte la barre : ses volets s'ajoutent à droite de ceux de l'onglet
     /// actif (multiview), avec leur contenu et leur historique.
@@ -218,6 +223,8 @@ pub enum Msg {
     RecentLoaded(Vec<RecentItem>),
     /// Historique des opérations lu dans la base (du plus récent au plus ancien).
     OpHistoryLoaded(Vec<fx_store::OpEntry>),
+    /// Historique de navigation lu dans la base (du plus récent au plus ancien).
+    VisitsLoaded(Vec<fx_store::Visit>),
     PreviewLoaded(Option<Preview>),
     GitBranch {
         pane: PaneId,

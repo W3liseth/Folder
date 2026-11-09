@@ -43,6 +43,8 @@ pub struct CommandContext {
     pub update_ready: bool,
     /// Le centre d'état a des opérations terminées.
     pub has_op_history: bool,
+    /// L'historique de navigation a des dossiers.
+    pub has_visits: bool,
     /// Le dossier affiché est dans un dépôt Git.
     pub git_repo: bool,
 }
@@ -108,6 +110,8 @@ commands! {
     Home => Navigation, "Accueil", "\u{E80F}", ["Alt+Home"];
     EditPath => Navigation, "Modifier le chemin", "\u{E70F}", ["Ctrl+L", "Alt+D", "F4"];
     Search => Navigation, "Rechercher", "\u{E721}", ["Ctrl+F", "F3"];
+    History => Navigation, "Historique", "\u{E81C}", ["Ctrl+Shift+H"];
+    ClearHistory => Navigation, "Effacer l'historique de navigation", "\u{E74D}", [];
     CommandPalette => Navigation, "Palette de commandes", "\u{E945}", ["Ctrl+Shift+P"];
     // Onglets et volets
     NewTab => Tabs, "Nouvel onglet", "\u{E710}", ["Ctrl+T"];
@@ -248,6 +252,7 @@ impl CommandId {
             EmptyRecycleBin => true,
             InstallUpdate => c.update_ready,
             ClearOperationHistory => c.has_op_history,
+            ClearHistory => c.has_visits,
             GitBranches => c.git_repo,
             _ => true,
         }

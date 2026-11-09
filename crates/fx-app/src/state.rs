@@ -449,7 +449,10 @@ pub struct UiRequests {
 pub struct AppState {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
+    /// Onglets fermés (emplacement de leur volet actif), du plus ancien au plus récent.
     pub closed_tabs: Vec<Location>,
+    /// Historique de navigation (onglet Historique).
+    pub visits: crate::history::Visits,
     pub settings: Settings,
     pub keymap: KeyMap,
     pub drives: Vec<Drive>,
@@ -503,6 +506,7 @@ impl AppState {
             tabs: Vec::new(),
             active_tab: 0,
             closed_tabs: Vec::new(),
+            visits: crate::history::Visits::default(),
             keymap,
             drives: Vec::new(),
             known: Vec::new(),
@@ -666,6 +670,7 @@ impl AppState {
             in_recycle_bin: matches!(pane.location(), Location::RecycleBin),
             update_ready: self.update.ready_version().is_some(),
             has_op_history: !self.op_history.is_empty(),
+            has_visits: !self.visits.is_empty(),
             git_repo: pane.git_branch.is_some(),
         }
     }

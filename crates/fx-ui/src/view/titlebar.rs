@@ -35,7 +35,8 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, maximized: bool) {
             let buttons_w = BUTTON_W * 3.0 + update_w;
             let tabs_area = Rect::from_min_max(
                 pos2(full.left() + 8.0, full.top() + 6.0),
-                pos2(full.right() - buttons_w - 46.0, full.bottom()),
+                // Place du « + » et du chevron du menu des onglets.
+                pos2(full.right() - buttons_w - 70.0, full.bottom()),
             );
             let end_x = tabs(ui, f, tabs_area);
 
@@ -56,10 +57,11 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, maximized: bool) {
             {
                 f.cmd(CommandId::NewTab);
             }
+            let more = tabs_menu_button(ui, f, plus);
 
             // Zone de déplacement de la fenêtre (le reste de la barre).
             let drag = Rect::from_min_max(
-                pos2(plus.right() + 4.0, full.top()),
+                pos2(more.right() + 4.0, full.top()),
                 pos2(full.right() - buttons_w, full.bottom()),
             );
             if drag.width() > 0.0 {
@@ -74,6 +76,69 @@ pub fn draw(ui: &mut Ui, f: &mut Fx<'_>, maximized: bool) {
 
             window_buttons(ui, f, full, maximized);
         });
+}
+
+/// Chevron à droite du « + » : menu de l'historique de navigation et des onglets récemment
+/// fermés. Renvoie sa zone.
+fn tabs_menu_button(ui: &mut Ui, f: &mut Fx<'_>, plus: Rect) -> Rect {
+    let pal = f.pal;
+    let rect = Rect::from_min_size(
+        pos2(plus.right() + 2.0, plus.top()),
+        vec2(26.0, plus.height()),
+    );
+    let r = ui.interact(rect, Id::unique("tabs-menu"), Sense::click());
+    widgets::hover_fill(ui, &r, rect, &pal, 4.0);
+    // Même corps et même centre que le « + » : les deux glyphes Segoe Fluent sont centrés
+    // dans leur cadratin, ils tombent ainsi sur la même ligne.
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        glyph::CHEVRON_DOWN,
+        icon_font(12.0),
+        pal.text2,
+    );
+    let r = r.on_hover_text("Historique et onglets récemment fermés");
+    egui::Popup::menu(&r).show(|ui| {
+        widgets::menu_appear(ui);
+        ui.set_min_width(250.0);
+        super::toolbar::menu_cmd(ui, f, CommandId::History, "");
+        let closed = !f.state.closed_tabs.is_empty();
+        ui.add_enabled_ui(closed, |ui| {
+            ui.menu_button(
+                widgets::menu_entry(glyph::UNDO, "Onglets récemment fermés", &pal),
+                |ui| closed_tabs_menu(ui, f),
+            );
+        });
+    });
+    rect
+}
+
+/// Onglets récemment fermés, du plus récent au plus ancien : un clic rouvre celui-là.
+fn closed_tabs_menu(ui: &mut Ui, f: &mut Fx<'_>) {
+    widgets::menu_appear(ui);
+    ui.set_min_width(240.0);
+    ui.set_max_width(420.0);
+    let shortcut = f.shortcut(CommandId::ReopenClosedTab);
+    let newest = f.state.closed_tabs.len().saturating_sub(1);
+    let mut reopen = None;
+    widgets::menu_scroll(ui, |ui| {
+        for (i, loc) in f.state.closed_tabs.iter().enumerate().rev() {
+            let title = loc.title();
+            f.vs.fallbacks.scan(&title);
+            let mut b = egui::Button::new(widgets::menu_entry(location_glyph(loc), &title, &f.pal))
+                .truncate();
+            if i == newest {
+                b = b.shortcut_text(shortcut.clone());
+            }
+            if ui.add(b).on_hover_text(full_name(loc)).clicked() {
+                reopen = Some(i);
+                ui.close();
+            }
+        }
+    });
+    if let Some(i) = reopen {
+        f.send(Msg::ReopenClosedTab(i));
+    }
 }
 
 /// Dessine les onglets ; renvoie l'abscisse de fin.
@@ -510,6 +575,7 @@ pub(crate) fn location_glyph(loc: &Location) -> &'static str {
         Location::Network(_) => glyph::NETWORK,
         Location::DiskUsage { .. } => glyph::PIE,
         Location::Settings => glyph::SETTINGS,
+        Location::History => glyph::HISTORY,
     }
 }
 

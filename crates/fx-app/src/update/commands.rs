@@ -139,10 +139,15 @@ pub fn run(state: &mut AppState, id: CommandId) -> Vec<Effect> {
             state.active_tab = (state.active_tab + state.tabs.len() - 1) % state.tabs.len();
             vec![]
         }
-        ReopenClosedTab => match state.closed_tabs.pop() {
-            Some(loc) => nav::open_tab(state, loc),
-            None => vec![],
+        ReopenClosedTab => match state.closed_tabs.len() {
+            0 => vec![],
+            n => nav::reopen_closed_tab(state, n - 1),
         },
+        History => nav::open_history(state),
+        ClearHistory => {
+            state.visits.clear();
+            vec![Effect::Persist(Persist::ClearVisits)]
+        }
         NewWindow => vec![Effect::NewWindow {
             start: Some(state.pane().location().window_arg()),
             rect: None,

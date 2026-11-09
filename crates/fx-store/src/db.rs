@@ -1,5 +1,6 @@
-//! Base SQLite : étiquettes, préférences d'affichage par dossier et historique des
-//! opérations (centre d'état), partagés par toutes les fenêtres (un processus chacune).
+//! Base SQLite : étiquettes, préférences d'affichage par dossier, historique des
+//! opérations (centre d'état) et historique de navigation, partagés par toutes les fenêtres
+//! (un processus chacune).
 //!
 //! Les étiquettes sont indexées par chemin. Les renommages et déplacements faits par fx
 //! mettent la base à jour (`move_path`) ; ceux faits hors de fx perdent l'étiquette
@@ -54,6 +55,17 @@ pub struct OpEntry {
 /// Opérations gardées dans l'historique (les plus récentes).
 pub const MAX_OP_HISTORY: usize = 100;
 
+/// Dossier de l'historique de navigation : une entrée par dossier, à sa dernière visite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Visit {
+    pub path: PathBuf,
+    /// Dernière visite (FILETIME UTC).
+    pub at: i64,
+}
+
+/// Dossiers gardés dans l'historique de navigation (les plus récents).
+pub const MAX_VISITS: usize = 500;
+
 pub struct Db {
     conn: Connection,
 }
@@ -64,6 +76,8 @@ CREATE TABLE IF NOT EXISTS tagged (path TEXT NOT NULL COLLATE NOCASE, tag INTEGE
 CREATE TABLE IF NOT EXISTS folder_prefs (path TEXT PRIMARY KEY COLLATE NOCASE, layout TEXT NOT NULL, sort_key INTEGER NOT NULL, sort_desc INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS op_history (id INTEGER PRIMARY KEY, ended INTEGER NOT NULL, title TEXT NOT NULL, items INTEGER NOT NULL, outcome TEXT NOT NULL, error TEXT, duration_ms INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS op_history_ended ON op_history (ended);
+CREATE TABLE IF NOT EXISTS visits (path TEXT PRIMARY KEY COLLATE NOCASE, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS visits_at ON visits (at);
 ";
 
 /// Étiquettes proposées au premier lancement (comme Files).
@@ -229,6 +243,52 @@ impl Db {
         self.conn.execute("DELETE FROM op_history", []).map(drop)
     }
 
+    /// Historique de navigation, du plus récent au plus ancien.
+    pub fn visits(&self) -> rusqlite::Result<Vec<Visit>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT path, at FROM visits ORDER BY at DESC LIMIT ?1")?;
+        st.query_map(params![MAX_VISITS as i64], |r| {
+            Ok(Visit {
+                path: PathBuf::from(r.get::<_, String>(0)?),
+                at: r.get(1)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// Visite d'un dossier (date remplacée s'il y est déjà) ; au-delà de [`MAX_VISITS`],
+    /// les plus anciens sont retirés.
+    pub fn add_visit(&self, v: &Visit) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO visits (path, at) VALUES (?1, ?2)
+             ON CONFLICT (path) DO UPDATE SET path = excluded.path, at = MAX(at, excluded.at)",
+            params![v.path.to_string_lossy(), v.at],
+        )?;
+        self.conn
+            .execute(
+                "DELETE FROM visits WHERE path NOT IN
+                 (SELECT path FROM visits ORDER BY at DESC LIMIT ?1)",
+                params![MAX_VISITS as i64],
+            )
+            .map(drop)
+    }
+
+    pub fn remove_visits(&self, paths: &[PathBuf]) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for p in paths {
+            tx.execute(
+                "DELETE FROM visits WHERE path = ?1",
+                params![p.to_string_lossy()],
+            )?;
+        }
+        tx.commit()
+    }
+
+    pub fn clear_visits(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM visits", []).map(drop)
+    }
+
     /// Toutes les associations chemin → étiquette (chargées en mémoire au démarrage).
     pub fn tagged(&self) -> rusqlite::Result<Vec<(PathBuf, TagId)>> {
         let mut st = self.conn.prepare("SELECT path, tag FROM tagged")?;
@@ -361,6 +421,33 @@ mod tests {
         );
         db.clear_ops().expect("clear");
         assert!(db.op_history().expect("history").is_empty());
+    }
+
+    #[test]
+    fn visits_are_unique_per_folder_bounded_and_removable() {
+        let db = Db::in_memory().expect("db");
+        let v = |p: &str, at| Visit {
+            path: PathBuf::from(p),
+            at,
+        };
+        db.add_visit(&v(r"C:\A", 1)).expect("add");
+        db.add_visit(&v(r"C:\B", 2)).expect("add");
+        // Même dossier (casse différente) : une seule entrée, à sa dernière visite.
+        db.add_visit(&v(r"c:\a", 3)).expect("add");
+        assert_eq!(
+            db.visits().expect("visits"),
+            vec![v(r"c:\a", 3), v(r"C:\B", 2)]
+        );
+        db.remove_visits(&[PathBuf::from(r"C:\A")]).expect("remove");
+        assert_eq!(db.visits().expect("visits"), vec![v(r"C:\B", 2)]);
+        for at in 10..(10 + MAX_VISITS as i64 + 5) {
+            db.add_visit(&v(&format!(r"C:\d{at}"), at)).expect("add");
+        }
+        let all = db.visits().expect("visits");
+        assert_eq!(all.len(), MAX_VISITS);
+        assert_eq!(all[0].at, 10 + MAX_VISITS as i64 + 4);
+        db.clear_visits().expect("clear");
+        assert!(db.visits().expect("visits").is_empty());
     }
 
     #[test]

@@ -169,6 +169,7 @@ fn omnibar(ui: &mut Ui, f: &mut Fx<'_>, width: f32) {
     match f.state.pane().location().clone() {
         Location::Home => crumb_label(&mut ui, f, glyph::HOME, "Accueil"),
         Location::Settings => crumb_label(&mut ui, f, glyph::SETTINGS, "Paramètres"),
+        Location::History => crumb_label(&mut ui, f, glyph::HISTORY, "Historique"),
         Location::Tag(t) => {
             let name = f
                 .state

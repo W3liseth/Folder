@@ -855,6 +855,10 @@ fn persist(paths: &Paths, db: &Mutex<Option<Db>>, p: Persist, out: &Outbox) {
                 }
                 Persist::ClearOps => db.clear_ops().and_then(|()| send_ops(db, out)),
                 Persist::LoadOps => send_ops(db, out),
+                Persist::Visit(v) => db.add_visit(&v),
+                Persist::ForgetVisits(paths) => db.remove_visits(&paths),
+                Persist::ClearVisits => db.clear_visits(),
+                Persist::LoadVisits => db.visits().map(|v| out.send(Msg::VisitsLoaded(v))),
                 Persist::Settings(_) | Persist::Session(_) => Ok(()),
             }
             .map_err(|e| e.to_string())

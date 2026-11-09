@@ -48,6 +48,12 @@ pub enum Persist {
     /// Simple lecture (démarrage, ouverture du centre d'état : les autres fenêtres écrivent
     /// aussi dans la base).
     LoadOps,
+    /// Historique de navigation. Seule la lecture répond (`Msg::VisitsLoaded`) : l'état est
+    /// déjà à jour des écritures de cette fenêtre.
+    Visit(fx_store::Visit),
+    ForgetVisits(Vec<PathBuf>),
+    ClearVisits,
+    LoadVisits,
 }
 
 /// Travail demandé par `update`, exécuté hors du thread UI par le `Scheduler`.

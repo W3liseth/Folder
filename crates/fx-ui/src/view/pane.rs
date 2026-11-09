@@ -481,7 +481,7 @@ fn transition(ui: &Ui, f: &mut Fx<'_>, pane: &Pane) -> (egui::Vec2, f32) {
     use fx_app::state::NavKind;
     const DURATION: f32 = 0.18;
     let content = match pane.location() {
-        Location::Home | Location::Settings => pane.nav.serial,
+        Location::Home | Location::Settings | Location::History => pane.nav.serial,
         _ => pane
             .listing
             .as_ref()
@@ -519,6 +519,10 @@ fn draw_pane(ui: &mut Ui, f: &mut Fx<'_>, pane: &Pane) {
     let pal = f.pal;
     if let Location::Settings = pane.location() {
         super::settings::page(ui, f, pane.id);
+        return;
+    }
+    if let Location::History = pane.location() {
+        super::history::page(ui, f, pane.id);
         return;
     }
     if let Location::Search { .. } = pane.location() {
