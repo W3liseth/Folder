@@ -505,7 +505,12 @@ dans les chemins chauds.
   **IOCP unique** ; tampon 64 Ko ; débordement → ré-énumération complète.
 - Événements regroupés (**debounce 50 ms**) puis appliqués comme diff sur le `DirSnapshot`
   (insert/remove/update + renommage old→new), sans recharger le dossier.
-- Désabonnement immédiat quand le volet quitte le dossier.
+- Désabonnement immédiat quand le volet quitte le dossier. L'arrêt d'une surveillance
+  annule sa lecture et attend sa fin, seulement si une lecture a bien été lancée
+  (`DirWatch::armed`) : le réarmement échoue tout de suite sur un dossier supprimé, et
+  attendre alors figeait le thread de surveillance, donc toutes les listes. Un paquet est
+  attribué à la surveillance dont il porte l'`OVERLAPPED` (`DirWatch::owns`), pas à la seule
+  clé, réutilisée par le volet à chaque navigation.
 - Les opérations de folder ne dépendent pas de la surveillance : à leur fin, les chemins
   touchés (sources, destinations, éléments créés, archive extraite) situés dans un dossier
   affiché sont relus (`fx_fs::restat`, pool d'I/O) et appliqués comme les notifications.

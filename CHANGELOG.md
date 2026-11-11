@@ -5,6 +5,12 @@ est affiché dans Paramètres › Mises à jour › Notes de version et sert de 
 release GitHub : chaque changement de version dans Cargo.toml commence par une nouvelle
 section `## <version> — <date>` en tête (vérifié par `cargo test`).
 
+## 0.14.1 — 2026-11-11
+
+- Correction : un fichier enregistré ou créé dans le dossier affiché n'apparaissait plus
+  sans actualiser. Il suffisait qu'un dossier affiché soit supprimé pour que folder cesse
+  de suivre les changements de tous les dossiers jusqu'à son redémarrage.
+
 ## 0.14.0 — 2026-11-09
 
 - Nouvel onglet **Historique** (Ctrl+Maj+H) : les dossiers récemment ouverts, regroupés

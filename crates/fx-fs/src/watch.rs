@@ -126,9 +126,10 @@ fn run(port: &Port, cmds: &Receiver<Cmd>, deliver: &dyn Fn(DirEvent)) {
                     Err(crossbeam_channel::TryRecvError::Disconnected) => return,
                 }
             },
-            Wait::Ready { key, bytes } => {
-                // Paquets d'E/S annulées (surveillance retirée) : clé inconnue, ignorée.
-                if let Some(e) = watches.get_mut(&(key as u64)) {
+            Wait::Ready { key, bytes, ov } => {
+                // Paquet d'une surveillance retirée ou remplacée (même clé, autre dossier) :
+                // ignoré, sans quoi la surveillance actuelle serait réarmée en double.
+                if let Some(e) = watches.get_mut(&(key as u64)).filter(|e| e.watch.owns(ov)) {
                     if bytes == 0 {
                         e.rescan = true;
                     } else {

@@ -35,9 +35,11 @@ unsafe impl Sync for Port {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wait {
     /// Notifications disponibles pour la surveillance `key` (`bytes == 0` : débordement).
+    /// `ov` identifie l'E/S terminée (cf. [`DirWatch::owns`]).
     Ready {
         key: usize,
         bytes: u32,
+        ov: usize,
     },
     /// Réveil explicite (`Port::wake`) ou opération annulée.
     Woken {
@@ -60,7 +62,11 @@ impl Port {
         let r =
             unsafe { GetQueuedCompletionStatus(self.0, &mut bytes, &mut key, &mut ov, timeout_ms) };
         match r {
-            Ok(()) if !ov.is_null() => Wait::Ready { key, bytes },
+            Ok(()) if !ov.is_null() => Wait::Ready {
+                key,
+                bytes,
+                ov: ov as usize,
+            },
             Ok(()) => Wait::Woken { key },
             Err(e)
                 if ov.is_null()
@@ -107,6 +113,10 @@ pub struct DirWatch {
     event: HANDLE,
     ov: Box<OVERLAPPED>,
     buf: Box<[u32]>,
+    /// Une lecture a été lancée (son `OVERLAPPED` est au noyau jusqu'à sa fin). Faux après
+    /// un échec immédiat de `ReadDirectoryChangesW` (dossier supprimé, volume retiré) : rien
+    /// à attendre au `Drop`, qui sinon attendrait pour toujours une E/S jamais lancée.
+    armed: bool,
 }
 
 // SAFETY: la surveillance n'est manipulée que par un thread à la fois (déplacée vers le thread
@@ -143,6 +153,7 @@ impl DirWatch {
             event,
             ov: Box::default(),
             buf: vec![0u32; BUF_WORDS].into_boxed_slice(),
+            armed: false,
         };
         // SAFETY: associe le handle au port existant avec la clé de l'appelant.
         unsafe { CreateIoCompletionPort(handle, Some(port.0), key, 0) }
@@ -165,7 +176,7 @@ impl DirWatch {
         };
         // SAFETY: tampon et OVERLAPPED en tas, possédés par `self`, vivants jusqu'au Drop qui
         // attend la fin de l'E/S ; tampon aligné sur 4 octets.
-        unsafe {
+        let r = unsafe {
             ReadDirectoryChangesW(
                 self.handle,
                 self.buf.as_mut_ptr().cast(),
@@ -176,8 +187,20 @@ impl DirWatch {
                 Some(&raw mut *self.ov),
                 None,
             )
+        };
+        // Échec immédiat : aucune E/S en cours, mais `Internal` reste à STATUS_PENDING
+        // (écrit avant l'appel système) ; `GetOverlappedResult` y attendrait sans fin.
+        self.armed = r.is_ok();
+        if !self.armed {
+            self.ov.Internal = 0;
         }
-        .op("ReadDirectoryChangesW")
+        r.op("ReadDirectoryChangesW")
+    }
+
+    /// Vrai si `ov` (reçu avec [`Wait::Ready`]) est l'E/S de cette surveillance, et non celle
+    /// d'une surveillance remplacée sous la même clé dont le paquet était encore en file.
+    pub fn owns(&self, ov: usize) -> bool {
+        std::ptr::eq(ov as *const OVERLAPPED, &raw const *self.ov)
     }
 
     /// Décode les `bytes` premiers octets du tampon (après une complétion `Ready`).
@@ -234,8 +257,10 @@ impl Drop for DirWatch {
         // SAFETY: annule l'E/S en cours puis attend sa fin avant de libérer tampon et
         // OVERLAPPED ; enfin ferme le handle possédé.
         unsafe {
-            let _ = CancelIoEx(self.handle, Some(&raw const *self.ov));
-            let _ = GetOverlappedResult(self.handle, &raw const *self.ov, &mut n, true);
+            if self.armed {
+                let _ = CancelIoEx(self.handle, Some(&raw const *self.ov));
+                let _ = GetOverlappedResult(self.handle, &raw const *self.ov, &mut n, true);
+            }
             let _ = CloseHandle(self.handle);
             let _ = CloseHandle(self.event);
         }
@@ -259,7 +284,8 @@ mod tests {
         let mut seen = Vec::new();
         for _ in 0..20 {
             match port.wait(500) {
-                Wait::Ready { key: 7, bytes } => {
+                Wait::Ready { key: 7, bytes, ov } => {
+                    assert!(w.owns(ov));
                     seen.extend(
                         w.events(bytes)
                             .into_iter()
@@ -291,5 +317,36 @@ mod tests {
         }
         assert!(woke);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Dossier surveillé supprimé : le réarmement échoue tout de suite ; le `Drop` ne doit pas
+    /// attendre une E/S qui n'existe pas (il bloquait le thread de surveillance pour toujours).
+    #[test]
+    fn drop_after_watched_dir_deleted_returns() {
+        let dir = std::env::temp_dir().join(format!("fx-watchdel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let port = Port::new().expect("port");
+        let mut w = DirWatch::open(&dir, &port, 7).expect("watch");
+        std::fs::write(dir.join("a.txt"), b"x").expect("write");
+        std::fs::remove_dir_all(&dir).expect("rm");
+        let mut failed = false;
+        for _ in 0..10 {
+            match port.wait(300) {
+                Wait::Ready { .. } => failed |= w.arm().is_err(),
+                Wait::Timeout => break,
+                Wait::Woken { .. } => {}
+            }
+        }
+        assert!(failed, "le réarmement aurait dû échouer");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(w);
+            let _ = tx.send(());
+        });
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(3)).is_ok(),
+            "Drop bloqué"
+        );
     }
 }
